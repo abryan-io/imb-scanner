@@ -490,6 +490,23 @@ uploaded = st.file_uploader(
 
 if uploaded:
     pil_img = Image.open(uploaded)
+    # Fix EXIF orientation — phone cameras embed rotation metadata that PIL
+    # ignores by default, causing the image to arrive sideways or upside down
+    try:
+        from PIL.ExifTags import TAGS
+        exif = pil_img._getexif()
+        if exif:
+            for tag, value in exif.items():
+                if TAGS.get(tag) == 'Orientation':
+                    if value == 3:
+                        pil_img = pil_img.rotate(180, expand=True)
+                    elif value == 6:
+                        pil_img = pil_img.rotate(270, expand=True)
+                    elif value == 8:
+                        pil_img = pil_img.rotate(90, expand=True)
+                    break
+    except Exception:
+        pass  # No EXIF data or not a JPEG — continue normally
 
     col1, col2 = st.columns(2)
     with col1:
