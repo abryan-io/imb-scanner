@@ -198,14 +198,18 @@ def locate_centers(col_proj, w):
 
     return centers, segs
 
-def classify_bars(centers, binary, tracker_band):
+def classify_bars(centers, binary, tracker_band=None):
     """
-    Classify each bar as F/A/D/T.
+    Classify each bar as F/A/D/T using USPS proportional extent method.
 
-    Measures each bar's top and bottom pixel row, then determines thresholds:
-    1. Primary: use tracker_band bounds (most reliable when band is well-detected)
-    2. Fallback: percentile split — in a typical IMB ~50% of bars have ascenders
-       and ~50% have descenders, so the median top/bottom naturally separates them.
+    The spec defines fixed proportions: F bars span the full height. The
+    ascender zone is the top ~33% of total bar height, the descender zone
+    is the bottom ~33%. A bar that reaches into the top zone has an ascender;
+    a bar that reaches into the bottom zone has a descender.
+
+    We derive the coordinate system from the global min/max of all bar tops
+    and bottoms — the F bars (tallest) define the full extent, and everything
+    else is measured against that. No clustering, no statistics, no tuning.
     """
     h, w = binary.shape
     half = 3
@@ -216,42 +220,24 @@ def classify_bars(centers, binary, tracker_band):
         rows  = np.where(strip > 0)[0]
         meas.append((int(rows[0]), int(rows[-1])) if len(rows) else (h//4, 3*h//4))
 
-    tops    = np.array([m[0] for m in meas], dtype=float)
-    bottoms = np.array([m[1] for m in meas], dtype=float)
+    tops    = [m[0] for m in meas]
+    bottoms = [m[1] for m in meas]
 
-    if tracker_band is not None:
-        tk_top, tk_bot = tracker_band
-        tk_h = max(1, tk_bot - tk_top)
-        # Sanity check: tracker band must be meaningfully smaller than full bar height
-        # If it spans >85% of crop height it's bogus — fall through to percentile
-        if tk_h < h * 0.85:
-            tol      = tk_h * 0.15
-            asc_thr  = tk_top + tol   # bar top must be above this → ascender
-            desc_thr = tk_bot - tol   # bar bottom must be below this → descender
-            method   = "tracker-band"
-        else:
-            tracker_band = None  # force fallback
+    # Global extent — defined by the tallest bars (F bars)
+    global_top    = min(tops)
+    global_bottom = max(bottoms)
+    bar_h         = max(1, global_bottom - global_top)
 
-    if tracker_band is None:
-        # Largest-gap split: bar tops cluster into two groups
-        # (ascender-top = low row values, tracker-top = higher row values)
-        # Find the biggest jump in sorted values — that's the cluster boundary.
-        def largest_gap_mid(vals):
-            s = sorted(vals)
-            gaps = [s[k+1] - s[k] for k in range(len(s)-1)]
-            if not gaps or max(gaps) < 2:
-                return float(np.mean(s))
-            sp = gaps.index(max(gaps))
-            return (s[sp] + s[sp+1]) / 2.0
-        asc_thr  = largest_gap_mid(list(tops))
-        desc_thr = largest_gap_mid(list(bottoms))
-        method   = "largest-gap"
+    # USPS proportions: ascender/descender zones occupy the outer ~33% each
+    asc_thr  = global_top    + bar_h * 0.33   # bar top must be ABOVE this → ascender
+    desc_thr = global_bottom - bar_h * 0.33   # bar bottom must be BELOW this → descender
 
     fadt = []
     for bt, bb in meas:
-        a = bt < asc_thr; d = bb > desc_thr
+        a = bt < asc_thr
+        d = bb > desc_thr
         fadt.append('F' if a and d else 'A' if a else 'D' if d else 'T')
-    return ''.join(fadt), method
+    return ''.join(fadt), "usps-proportional"
 
 def extract_fadt(crop_gray, scale_label=""):
     """
@@ -274,7 +260,7 @@ def extract_fadt(crop_gray, scale_label=""):
             debug[f"{label}_bars"] = len(centers)
             if len(centers) != 65: continue
 
-            tracker  = find_tracker_band(binary, centers)
+            tracker  = None  # no longer needed — using USPS proportional method
             fadt_str, cls_method = classify_bars(centers, binary, tracker)
             if not fadt_str or len(fadt_str) != 65: continue
 
