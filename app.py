@@ -267,18 +267,21 @@ def extract_fadt(crop_gray: np.ndarray):
         thr = col_proj.max() * 0.25
         in_bar = col_proj > thr
 
-        centers = []
+        # Collect raw bar segments (start, end, center)
+        segments = []
         i = 0
         while i < w:
             if in_bar[i]:
                 s = i
                 while i < w and in_bar[i]:
                     i += 1
-                centers.append((s + i) // 2)
+                segments.append((s, i, (s + i) // 2))
             else:
                 i += 1
 
-        # Attempt merge if slightly over 65
+        centers = [seg[2] for seg in segments]
+
+        # ── Merge if slightly over 65 (noise splits) ──────────────────────
         if len(centers) > 65:
             pitch = w / 65
             merged = [centers[0]]
@@ -288,6 +291,31 @@ def extract_fadt(crop_gray: np.ndarray):
                 else:
                     merged.append(bc)
             centers = merged
+
+        # ── Split wide bars if under 65 (adjacent bars merged) ────────────
+        if len(centers) < 65 and len(centers) >= 40:
+            # Estimate pitch from the span of detected bars
+            est_pitch = (centers[-1] - centers[0]) / (len(centers) - 1) if len(centers) > 1 else w / 65
+            split_centers = []
+            for seg_start, seg_end, seg_cx in segments:
+                seg_w = seg_end - seg_start
+                n_bars = max(1, round(seg_w / est_pitch))
+                if n_bars == 1:
+                    split_centers.append(seg_cx)
+                else:
+                    # Evenly distribute sub-bar centers within this segment
+                    for k in range(n_bars):
+                        sub_cx = seg_start + int((k + 0.5) * seg_w / n_bars)
+                        split_centers.append(sub_cx)
+            centers = split_centers
+
+        # ── Force-pitch fallback: use span endpoints to place 65 samples ──
+        if len(centers) != 65 and len(centers) >= 40:
+            # Best estimate of barcode start/end from detected bars
+            span_start = segments[0][0]
+            span_end   = segments[-1][1]
+            pitch = (span_end - span_start) / 64.0
+            centers = [int(span_start + i * pitch) for i in range(65)]
 
         debug[f"{bname}_bars"] = len(centers)
         if len(centers) != 65:
@@ -481,8 +509,13 @@ def scan_image(pil_img: Image.Image, log=None):
                 candidates.append((val, key))
 
         if not candidates:
-            emit("❌", f"Scale ×{scale} — could not extract 65 bars "
-                       f"(got {otsu_bars}). Bar spacing may be too tight — try closer/better-lit photo.")
+            n_bars = fadt_dbg.get(f'otsu_bars', 0)
+            if n_bars >= 40:
+                emit("❌", f"Scale ×{scale} — got {n_bars} bars, split/pitch recovery also failed. "
+                           f"Contrast between adjacent bars may be too low.")
+            else:
+                emit("❌", f"Scale ×{scale} — only {n_bars} bars found (need 65). "
+                           f"Barcode may be partially out of frame or too blurry.")
             continue
 
         # Try pyimb on each candidate — otsu first
