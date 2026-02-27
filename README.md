@@ -4,9 +4,11 @@ Streamlit app that detects and decodes USPS Intelligent Mail Barcodes (IMB) from
 
 ## How it works
 
-1. **OpenCV** locates the IMB band via morphological analysis (vertical bar clustering)
-2. **zxingcpp** decodes the 4-state barcode (FADT → binary → 20-digit number)
-3. **Pure Python** parses the 20-digit tracking code into: Barcode ID, STID, MID, Serial Number, Routing Code
+1. **Sobel-X edge density** finds the barcode band (the row with the densest vertical edges)
+2. **Otsu binarization + 4x upscale** produces a clean binary crop
+3. **Column projection** locates 65 bar centers with outlier filtering for text artifacts
+4. **Largest-gap clustering** classifies each bar as F/A/D/T by measuring top/bottom pixel extent
+5. **pyimb decode** converts FADT → codewords → tracking + routing (CRC-11 validated)
 
 ## Setup
 
@@ -14,8 +16,11 @@ Streamlit app that detects and decodes USPS Intelligent Mail Barcodes (IMB) from
 # Install dependencies
 pip install -r requirements.txt
 
-# Run the app
-streamlit run app.py
+# Run the Streamlit app
+streamlit run zapp.py
+
+# Or run CLI on a single image
+python app.py <image_path>
 ```
 
 Then open http://localhost:8501 in your browser.
