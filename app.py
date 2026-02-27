@@ -384,27 +384,45 @@ def render_synthetic_imb(fadt: str) -> np.ndarray:
 
 # ─── Main Pipeline ────────────────────────────────────────────────────────────
 
-def scan_image(pil_img: Image.Image):
+def scan_image(pil_img: Image.Image, log=None):
+    """
+    log: optional callable(icon, message) for live progress updates.
+         icon is one of "⏳", "✅", "❌", "🔍", "📊"
+    """
+    def emit(icon, msg):
+        if log:
+            log(icon, msg)
+
     img_rgb  = np.array(pil_img.convert("RGB"))
+    H0, W0   = img_rgb.shape[:2]
     gray     = to_gray(img_rgb)
     fadt_dbg = {}
     fadt_str = None
     synthetic = None
 
-    # Pass 1: full image
+    emit("🔍", f"Image loaded — {W0}×{H0}px")
+
+    # Pass 1: full image zxing
+    emit("⏳", "Pass 1 — trying zxing-cpp on full image (color / gray / sharpened)...")
     for candidate, lbl in [(img_rgb, "full-color"), (gray, "full-gray"),
                            (sharpen(gray), "full-sharp")]:
         text, method = try_zxing(candidate, lbl)
         if text:
+            emit("✅", f"Pass 1 decoded via zxing-cpp [{lbl}]")
             return text, img_rgb.copy(), None, None, None, method, {}
         text, method = try_pyzxing(candidate, lbl)
         if text:
+            emit("✅", f"Pass 1 decoded via python-zxing [{lbl}]")
             return text, img_rgb.copy(), None, None, None, method, {}
+    emit("❌", "Pass 1 — no decode from full image")
 
     # Detect region
+    emit("⏳", "Detecting IMB region via Sobel-X edge density...")
     region    = detect_imb_region(gray)
     annotated = img_rgb.copy()
     if region is None:
+        emit("❌", "Region detection FAILED — no high-density vertical-edge band found. "
+                   "Try a flatter, better-lit photo with the barcode filling more of the frame.")
         return None, annotated, None, None, None, "No IMB region detected", {}
 
     x, y, w, h = region
@@ -412,6 +430,8 @@ def scan_image(pil_img: Image.Image):
     H, W = img_rgb.shape[:2]
     x1 = max(0, x - pad);      y1 = max(0, y - pad)
     x2 = min(W, x + w + pad);  y2 = min(H, y + h + pad)
+    emit("✅", f"Region detected — bounding box ({x1},{y1})→({x2},{y2}), "
+               f"crop size {x2-x1}×{y2-y1}px")
 
     cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 200, 80), 2)
     cv2.putText(annotated, "IMB region", (x1, y1 - 6),
@@ -421,6 +441,7 @@ def scan_image(pil_img: Image.Image):
     crop_gray = gray[y1:y2, x1:x2]
 
     # Pass 2: zxing-cpp on crop at multiple scales
+    emit("⏳", "Pass 2 — trying zxing-cpp on detected crop at scales 1×–4×...")
     for scale in [2, 3, 4, 1]:
         for src, lbl in [(crop_rgb, "crop-color"), (crop_gray, "crop-gray"),
                           (sharpen(crop_gray), "crop-sharp")]:
@@ -428,17 +449,29 @@ def scan_image(pil_img: Image.Image):
                            interpolation=cv2.INTER_CUBIC) if scale != 1 else src
             text, method = try_zxing(s, f"{lbl}x{scale}")
             if text:
+                emit("✅", f"Pass 2 decoded via zxing-cpp [{lbl} ×{scale}]")
                 return text, annotated, crop_rgb, None, None, method, {}
             text, method = try_pyzxing(s, f"{lbl}x{scale}")
             if text:
+                emit("✅", f"Pass 2 decoded via python-zxing [{lbl} ×{scale}]")
                 return text, annotated, crop_rgb, None, None, method, {}
+    emit("❌", "Pass 2 — zxing-cpp could not decode crop at any scale "
+               "(expected — zxing-cpp lacks IMB support in this build)")
 
     # Pass 3: pixel FADT extraction -> pyimb direct decode -> synthetic fallback
+    emit("⏳", "Pass 3 — extracting FADT bar states via pixel analysis...")
     for scale in [4, 6, 8, 3]:
         scaled = cv2.resize(crop_gray, None, fx=scale, fy=scale,
                             interpolation=cv2.INTER_CUBIC)
         _, fadt_dbg = extract_fadt(scaled)
         fadt_dbg['pyimb_available'] = PYIMB_AVAILABLE
+
+        otsu_bars = fadt_dbg.get('otsu_bars', 0)
+        otsu_fadt = fadt_dbg.get('otsu_fadt', '')
+        adap_fadt = fadt_dbg.get('adaptive_fadt', '')
+        emit("📊", f"Scale ×{scale} — Otsu: {otsu_bars} bars detected, "
+                   f"FADT length={len(otsu_fadt)} | "
+                   f"Adaptive FADT length={len(adap_fadt)}")
 
         # Collect all valid FADT candidates from this scale (otsu + adaptive)
         candidates = []
@@ -447,21 +480,33 @@ def scan_image(pil_img: Image.Image):
             if val and len(val) == 65:
                 candidates.append((val, key))
 
+        if not candidates:
+            emit("❌", f"Scale ×{scale} — could not extract 65 bars "
+                       f"(got {otsu_bars}). Bar spacing may be too tight — try closer/better-lit photo.")
+            continue
+
         # Try pyimb on each candidate — otsu first
         for fadt_candidate, src_name in candidates:
             fadt_dbg['pyimb_fadt_input'] = fadt_candidate
             fadt_dbg['pyimb_source'] = src_name
+            emit("⏳", f"Scale ×{scale} — running pyimb decode on {src_name} FADT...")
             text, method = try_pyimb(fadt_candidate)
             fadt_dbg['pyimb_result'] = text
             fadt_dbg['pyimb_method'] = method
             if text:
                 fadt_str = fadt_candidate
+                emit("✅", f"pyimb decoded successfully from {src_name} at ×{scale}! CRC OK.")
                 return (text, annotated, crop_rgb, fadt_str, None,
                         f"FADT({src_name})+{method}", fadt_dbg)
+            else:
+                emit("❌", f"pyimb FAILED on {src_name} at ×{scale} — "
+                           f"result: {method}. Bar states likely have misclassifications.")
 
-        # Fallback: render synthetic from best candidate and try image decoders
+        # Fallback: render synthetic and try image decoders
         fadt_str = fadt_dbg.get('otsu_fadt') or fadt_dbg.get('adaptive_fadt')
         if fadt_str and len(fadt_str) == 65:
+            emit("⏳", f"Scale ×{scale} — rendering synthetic barcode from FADT, "
+                       "trying zxing-cpp as last resort...")
             synthetic = render_synthetic_imb(fadt_str)
             for syn_scale in [1, 2, 3]:
                 syn = (cv2.resize(synthetic, None, fx=syn_scale, fy=syn_scale,
@@ -469,14 +514,18 @@ def scan_image(pil_img: Image.Image):
                        if syn_scale > 1 else synthetic)
                 text, method = try_zxing(syn, f"synthetic-x{syn_scale}")
                 if text:
+                    emit("✅", f"Synthetic barcode decoded via zxing-cpp at ×{syn_scale}")
                     return (text, annotated, crop_rgb, fadt_str, synthetic,
                             f"FADT+{method}", fadt_dbg)
                 text, method = try_pyzxing(syn, f"synthetic-x{syn_scale}")
                 if text:
+                    emit("✅", f"Synthetic barcode decoded via python-zxing at ×{syn_scale}")
                     return (text, annotated, crop_rgb, fadt_str, synthetic,
                             f"FADT+{method}", fadt_dbg)
+            emit("❌", "Synthetic barcode also failed — all decode paths exhausted at this scale.")
             break  # FADT extracted but all decoders failed
 
+    emit("❌", "All passes failed. See FADT debug output below for clues.")
     return (None, annotated, crop_rgb, fadt_str, synthetic,
             "Detected region, decode failed", fadt_dbg)
 
@@ -513,8 +562,23 @@ if uploaded:
         st.subheader("Original")
         st.image(pil_img, use_container_width=True)
 
-    with st.spinner("Scanning..."):
-        decoded, annotated, crop, fadt, synthetic, method, fadt_dbg = scan_image(pil_img)
+    # Live progress log using st.status
+    log_lines = []
+    with st.status("🔍 Scanning barcode...", expanded=True) as status_box:
+        step_container = st.container()
+
+        def log(icon, msg):
+            log_lines.append((icon, msg))
+            step_container.markdown(f"{icon} {msg}")
+            status_box.update(label=f"{icon} {msg}")
+
+        decoded, annotated, crop, fadt, synthetic, method, fadt_dbg = scan_image(pil_img, log=log)
+
+        if decoded:
+            status_box.update(label="✅ Barcode decoded successfully!", state="complete")
+        else:
+            status_box.update(label="❌ Could not decode — see steps above for clues",
+                              state="error")
 
     with col2:
         st.subheader("Detection")
