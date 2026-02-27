@@ -12,7 +12,7 @@ import numpy as np
 from PIL import Image
 import intelligent_mail_barcode as imb
 from stid_table import lookup as stid_lookup, describe as stid_describe
-from app import detect_barcode_region, find_bar_runs, filter_to_65_bars, classify_bars_fadt
+from cli_app import detect_barcode_region, find_bar_runs, filter_to_65_bars, classify_bars_fadt
 
 # ─── Page config ────────────────────────────────────────────────────────────────
 
