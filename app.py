@@ -113,15 +113,33 @@ def estimate_pitch(col_proj, w):
     peak_idx = int(np.argmax(acorr[lo:hi])) + lo
     return float(peak_idx) if peak_idx > 0 else w/65.0
 
-def find_tracker_band(binary):
+def find_tracker_band(binary, centers):
     """
-    Tracker band = horizontal strip present in ALL 65 bars.
-    Row sums will be uniformly high here vs sparse above/below.
+    Find the tracker band by sampling ONLY at the bar center columns.
+    Every IMB bar has a tracker segment → the tracker band is the row range
+    where ALL (or nearly all) bar centers are dark.
+
+    Using full-width row sums (old approach) fails because the bars collectively
+    make every row look dense. Sampling only at bar positions gives a true signal.
     """
-    row_sums = binary.sum(axis=1).astype(float)
-    if row_sums.max() == 0: return None
-    row_sums /= row_sums.max()
-    dense = row_sums > 0.60
+    h = binary.shape[0]
+    if not centers:
+        return None
+
+    # Build a per-row coverage array: fraction of bar centers that are dark
+    coverage = np.zeros(h, dtype=float)
+    half = 2
+    w = binary.shape[1]
+    for cx in centers:
+        x0 = max(0, cx - half); x1 = min(w, cx + half + 1)
+        col = binary[:, x0:x1].max(axis=1).astype(float)
+        coverage += col
+    coverage /= len(centers)  # now: fraction of bars present at each row (0–1)
+
+    # Tracker band = rows where >80% of bars are present
+    dense = coverage > 0.80
+
+    # Find the longest contiguous dense band
     best_start, best_len, cur_start, cur_len = 0, 0, 0, 0
     for i, d in enumerate(dense):
         if d:
@@ -131,7 +149,11 @@ def find_tracker_band(binary):
                 best_len = cur_len; best_start = cur_start
         else:
             cur_len = 0
-    return (best_start, best_start+best_len) if best_len >= 2 else None
+
+    if best_len < 2:
+        return None
+    return (best_start, best_start + best_len)
+
 
 def locate_centers(col_proj, w):
     """Find 65 bar centers: threshold → split wide segments → force-pitch fallback."""
@@ -177,36 +199,59 @@ def locate_centers(col_proj, w):
     return centers, segs
 
 def classify_bars(centers, binary, tracker_band):
+    """
+    Classify each bar as F/A/D/T.
+
+    Measures each bar's top and bottom pixel row, then determines thresholds:
+    1. Primary: use tracker_band bounds (most reliable when band is well-detected)
+    2. Fallback: percentile split — in a typical IMB ~50% of bars have ascenders
+       and ~50% have descenders, so the median top/bottom naturally separates them.
+    """
     h, w = binary.shape
     half = 3
     meas = []
     for cx in centers:
-        x0 = max(0, cx-half); x1 = min(w, cx+half+1)
+        x0 = max(0, cx - half); x1 = min(w, cx + half + 1)
         strip = binary[:, x0:x1].max(axis=1)
         rows  = np.where(strip > 0)[0]
         meas.append((int(rows[0]), int(rows[-1])) if len(rows) else (h//4, 3*h//4))
 
-    tops    = [m[0] for m in meas]
-    bottoms = [m[1] for m in meas]
+    tops    = np.array([m[0] for m in meas], dtype=float)
+    bottoms = np.array([m[1] for m in meas], dtype=float)
 
     if tracker_band is not None:
         tk_top, tk_bot = tracker_band
-        tol      = max(1, (tk_bot-tk_top)*0.10)
-        asc_thr  = tk_top + tol
-        desc_thr = tk_bot - tol
-    else:
-        def lgap(vals):
-            s = sorted(vals); gaps = [s[k+1]-s[k] for k in range(len(s)-1)]
-            if not gaps or max(gaps) < 2: return float(np.mean(s))
-            sp = gaps.index(max(gaps)); return (s[sp]+s[sp+1])/2.0
-        asc_thr  = lgap(tops)
-        desc_thr = lgap(bottoms)
+        tk_h = max(1, tk_bot - tk_top)
+        # Sanity check: tracker band must be meaningfully smaller than full bar height
+        # If it spans >85% of crop height it's bogus — fall through to percentile
+        if tk_h < h * 0.85:
+            tol      = tk_h * 0.15
+            asc_thr  = tk_top + tol   # bar top must be above this → ascender
+            desc_thr = tk_bot - tol   # bar bottom must be below this → descender
+            method   = "tracker-band"
+        else:
+            tracker_band = None  # force fallback
+
+    if tracker_band is None:
+        # Largest-gap split: bar tops cluster into two groups
+        # (ascender-top = low row values, tracker-top = higher row values)
+        # Find the biggest jump in sorted values — that's the cluster boundary.
+        def largest_gap_mid(vals):
+            s = sorted(vals)
+            gaps = [s[k+1] - s[k] for k in range(len(s)-1)]
+            if not gaps or max(gaps) < 2:
+                return float(np.mean(s))
+            sp = gaps.index(max(gaps))
+            return (s[sp] + s[sp+1]) / 2.0
+        asc_thr  = largest_gap_mid(list(tops))
+        desc_thr = largest_gap_mid(list(bottoms))
+        method   = "largest-gap"
 
     fadt = []
     for bt, bb in meas:
         a = bt < asc_thr; d = bb > desc_thr
         fadt.append('F' if a and d else 'A' if a else 'D' if d else 'T')
-    return ''.join(fadt)
+    return ''.join(fadt), method
 
 def extract_fadt(crop_gray, scale_label=""):
     """
@@ -229,11 +274,12 @@ def extract_fadt(crop_gray, scale_label=""):
             debug[f"{label}_bars"] = len(centers)
             if len(centers) != 65: continue
 
-            tracker  = find_tracker_band(binary)
-            fadt_str = classify_bars(centers, binary, tracker)
+            tracker  = find_tracker_band(binary, centers)
+            fadt_str, cls_method = classify_bars(centers, binary, tracker)
             if not fadt_str or len(fadt_str) != 65: continue
 
-            debug[f"{label}_fadt"] = fadt_str
+            debug[f"{label}_fadt"]   = fadt_str
+            debug[f"{label}_clsmethod"] = cls_method
             result = pyimb.decode(fadt_str)
             if result and result.get('crc_ok'):
                 debug["winning_variant"] = label
