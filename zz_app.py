@@ -1,9 +1,15 @@
 """
-USPS Intelligent Mail Barcode (IMB) Scanner — Streamlit UI
-===========================================================
+USPS Intelligent Mail Barcode (IMB) Scanner
+============================================
 Deterministic pipeline — no AI, no API calls.
 
-Run: streamlit run zapp.py
+Pipeline:
+  1. Sobel-X edge density → locate barcode band
+  2. Crop, binarize, upscale
+  3. Bar segmentation with outlier filtering → 65 bar runs
+  4. Largest-gap clustering → FADT string (65 chars)
+  5. Decode FADT via pyimb → tracking + routing
+  6. Parse into USPS components (BarcodeID, STID, MID, Serial, Routing)
 """
 
 import streamlit as st
@@ -12,7 +18,6 @@ import numpy as np
 from PIL import Image
 import intelligent_mail_barcode as imb
 from stid_table import lookup as stid_lookup, describe as stid_describe
-from app import detect_barcode_region, find_bar_runs, filter_to_65_bars, classify_bars_fadt
 
 # ─── Page config ────────────────────────────────────────────────────────────────
 
@@ -26,6 +31,170 @@ st.title("📮 USPS Intelligent Mail Barcode Scanner")
 st.caption("Deterministic IMB detection · no AI · just pixels and math")
 
 
+# ─── Image Processing ───────────────────────────────────────────────────────────
+
+def to_gray(img_array: np.ndarray) -> np.ndarray:
+    """RGB/BGR → grayscale."""
+    if img_array.ndim == 3:
+        return cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
+    return img_array.copy()
+
+
+def detect_barcode_region(gray: np.ndarray):
+    """
+    Locate the IMB barcode band via Sobel-X vertical edge density.
+    Returns (x, y, w, h) or None.
+    """
+    H, W = gray.shape
+
+    edge = np.abs(cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3))
+
+    row_energy = edge.sum(axis=1)
+    ks = max(3, H // 60)
+    row_energy_smooth = np.convolve(row_energy, np.ones(ks) / ks, mode='same')
+
+    peak_row = int(np.argmax(row_energy_smooth))
+    threshold = row_energy_smooth[peak_row] * 0.40
+
+    top = peak_row
+    while top > 0 and row_energy_smooth[top - 1] > threshold:
+        top -= 1
+    bot = peak_row
+    while bot < H - 1 and row_energy_smooth[bot + 1] > threshold:
+        bot += 1
+
+    pad_v = max(4, (bot - top) // 2)
+    top = max(0, top - pad_v)
+    bot = min(H - 1, bot + pad_v)
+
+    if bot - top < 6:
+        return None
+
+    col_energy = edge[top:bot, :].sum(axis=0)
+    active = np.where(col_energy > col_energy.max() * 0.15)[0]
+    if len(active) == 0:
+        return None
+
+    xl, xr = int(active[0]), int(active[-1])
+    bw = xr - xl
+
+    if bw < 80 or bw / max(bot - top, 1) < 3.0:
+        return None
+
+    return xl, top, bw, bot - top
+
+
+def find_bar_runs(binary: np.ndarray):
+    """Find contiguous bar runs from column projection."""
+    _, uw = binary.shape
+    col_sum = binary.sum(axis=0)
+    kernel = np.ones(3, dtype=np.float32) / 3.0
+    col_smooth = np.convolve(col_sum.astype(np.float32), kernel, mode='same')
+
+    ink_thr = col_smooth.max() * 0.05
+    in_bar = col_smooth > ink_thr
+
+    bar_runs = []
+    i = 0
+    while i < uw:
+        if in_bar[i]:
+            j = i
+            while j < uw and in_bar[j]:
+                j += 1
+            bar_runs.append((i, j - 1))
+            i = j
+        else:
+            i += 1
+
+    return bar_runs
+
+
+def filter_to_65_bars(bar_runs, image_width):
+    """Filter bar runs to exactly 65 by removing width/spacing outliers."""
+    if len(bar_runs) == 65:
+        return bar_runs
+
+    if len(bar_runs) > 65:
+        widths = [e - s + 1 for s, e in bar_runs]
+        median_w = float(np.median(widths))
+
+        # Remove bars much wider than median (text artifacts)
+        filtered = [(s, e) for s, e in bar_runs if (e - s + 1) <= median_w * 2.5]
+
+        # Trim from edges based on inter-bar gap size
+        if len(filtered) > 65:
+            centers = [(s + e) / 2 for s, e in filtered]
+            keep = list(range(len(filtered)))
+            while len(keep) > 65:
+                left_gap = centers[keep[1]] - centers[keep[0]]
+                right_gap = centers[keep[-1]] - centers[keep[-2]]
+                if left_gap > right_gap:
+                    keep.pop(0)
+                else:
+                    keep.pop()
+            filtered = [filtered[i] for i in keep]
+
+        bar_runs = filtered
+
+    # Merge close bars if still over 65
+    if len(bar_runs) > 65:
+        pitch = (bar_runs[-1][1] - bar_runs[0][0]) / 65
+        merged = [bar_runs[0]]
+        for run in bar_runs[1:]:
+            prev_center = (merged[-1][0] + merged[-1][1]) / 2
+            curr_center = (run[0] + run[1]) / 2
+            if curr_center - prev_center < pitch * 0.55:
+                merged[-1] = (merged[-1][0], run[1])
+            else:
+                merged.append(run)
+        bar_runs = merged
+
+    return bar_runs
+
+
+def classify_bars_fadt(binary: np.ndarray, bar_runs: list) -> str:
+    """Classify bars as F/A/D/T using largest-gap clustering."""
+    uh, _ = binary.shape
+
+    measurements = []
+    for (s, e) in bar_runs:
+        col_strip = binary[:, s:e + 1].max(axis=1)
+        rows = np.where(col_strip > 127)[0]
+        if len(rows):
+            measurements.append((int(rows[0]), int(rows[-1])))
+        else:
+            measurements.append((uh // 4, 3 * uh // 4))
+
+    tops = [m[0] for m in measurements]
+    bottoms = [m[1] for m in measurements]
+
+    def largest_gap_threshold(vals):
+        s = sorted(vals)
+        gaps = [s[k + 1] - s[k] for k in range(len(s) - 1)]
+        if not gaps or max(gaps) < 2:
+            return float(np.mean(s))
+        sp = gaps.index(max(gaps))
+        return (s[sp] + s[sp + 1]) / 2.0
+
+    top_thr = largest_gap_threshold(tops)
+    bot_thr = largest_gap_threshold(bottoms)
+
+    fadt = []
+    for (bt, bb) in measurements:
+        has_asc = bt < top_thr
+        has_desc = bb > bot_thr
+        if has_asc and has_desc:
+            fadt.append('F')
+        elif has_asc:
+            fadt.append('A')
+        elif has_desc:
+            fadt.append('D')
+        else:
+            fadt.append('T')
+
+    return ''.join(fadt)
+
+
 # ─── Main Pipeline ──────────────────────────────────────────────────────────────
 
 def scan_image(pil_img: Image.Image):
@@ -36,7 +205,7 @@ def scan_image(pil_img: Image.Image):
              fadt_str | None, method_str, debug_info)
     """
     img_rgb = np.array(pil_img.convert("RGB"))
-    gray = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2GRAY)
+    gray = to_gray(img_rgb)
     H, W = gray.shape
     debug_info = {}
 
@@ -151,7 +320,7 @@ if pil_img:
 
     # Debug expander
     with st.expander("Debug: edge map & row energy"):
-        gray_dbg = cv2.cvtColor(np.array(pil_img.convert("RGB")), cv2.COLOR_RGB2GRAY)
+        gray_dbg = to_gray(np.array(pil_img.convert("RGB")))
         sobelx = cv2.Sobel(gray_dbg, cv2.CV_32F, 1, 0, ksize=3)
         edge_vis = np.abs(sobelx)
         edge_vis = (edge_vis / edge_vis.max() * 255).astype(np.uint8)
