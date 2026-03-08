@@ -12,7 +12,8 @@ import numpy as np
 from PIL import Image
 import intelligent_mail_barcode as imb
 from stid_table import lookup as stid_lookup, describe as stid_describe
-from cli_app import detect_barcode_region, find_bar_runs, filter_to_65_bars, classify_bars_fadt
+from cli_app import (detect_barcode_region, find_bar_runs, filter_to_65_bars,
+                     classify_bars_fadt, scan_image_robust)
 
 # ─── Page config ────────────────────────────────────────────────────────────────
 
@@ -39,64 +40,33 @@ def scan_image(pil_img: Image.Image):
     gray = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2GRAY)
     H, W = gray.shape
     debug_info = {}
-
-    # Detect barcode region
-    region = detect_barcode_region(gray)
     annotated = img_rgb.copy()
 
-    if region is None:
+    # Use robust multi-strategy scanner
+    result = scan_image_robust(gray)
+
+    if result is None:
+        # Show best candidate region for debugging
+        region = detect_barcode_region(gray)
+        if region is not None:
+            x, y, w, h = region
+            debug_info['region'] = {'x': x, 'y': y, 'w': w, 'h': h}
+            pad = 4
+            x1 = max(0, x - pad)
+            y1 = max(0, y - pad)
+            x2 = min(W, x + w + pad)
+            y2 = min(H, y + h + pad)
+            cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 0, 200), 2)
+            cv2.putText(annotated, "candidate (failed)", (x1, y1 - 6),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 200), 1)
+            crop_rgb = img_rgb[y1:y2, x1:x2]
+            return None, annotated, crop_rgb, None, "No IMB decoded", debug_info
         return None, annotated, None, None, "No IMB region detected", debug_info
 
-    x, y, w, h = region
-    debug_info['region'] = {'x': x, 'y': y, 'w': w, 'h': h}
-
-    pad = 4
-    x1 = max(0, x - pad)
-    y1 = max(0, y - pad)
-    x2 = min(W, x + w + pad)
-    y2 = min(H, y + h + pad)
-
-    cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 200, 80), 2)
-    cv2.putText(annotated, "IMB region", (x1, y1 - 6),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 200, 80), 1)
-
-    crop_rgb = img_rgb[y1:y2, x1:x2]
-    crop_gray = gray[y1:y2, x1:x2]
-
-    # Binarize and upscale
-    _, binary = cv2.threshold(crop_gray, 0, 255,
-                              cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-    scale = 4
-    ch, cw = binary.shape
-    up = cv2.resize(binary, (cw * scale, ch * scale),
-                    interpolation=cv2.INTER_NEAREST)
-
-    # Find and filter bars
-    bar_runs = find_bar_runs(up)
-    raw_count = len(bar_runs)
-    debug_info['raw_bar_count'] = raw_count
-
-    bar_runs = filter_to_65_bars(bar_runs, up.shape[1])
-    debug_info['filtered_bar_count'] = len(bar_runs)
-
-    if len(bar_runs) != 65:
-        return (None, annotated, crop_rgb, None,
-                f"Found {len(bar_runs)} bars (raw: {raw_count}), expected 65",
-                debug_info)
-
-    # FADT classification
-    fadt = classify_bars_fadt(up, bar_runs)
+    fadt = result.get('fadt', '')
     debug_info['fadt'] = fadt
-
-    # Decode
-    result = imb.decode(fadt)
-    if result is None:
-        return (None, annotated, crop_rgb, fadt,
-                "FADT extracted but decode failed (CRC error)", debug_info)
-
-    result['fadt'] = fadt
-    method = "Sobel-X + FADT + pyimb"
-    return result, annotated, crop_rgb, fadt, method, debug_info
+    method = "Multi-strategy robust scanner"
+    return result, annotated, None, fadt, method, debug_info
 
 
 # ─── Streamlit UI ────────────────────────────────────────────────────────────────
