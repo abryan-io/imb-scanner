@@ -275,32 +275,29 @@ def display_image_scan(pil_img):
 
 # ─── Streamlit UI ────────────────────────────────────────────────────────────────
 
-tab_upload, tab_pdf, tab_camera = st.tabs(["Upload Image", "Upload PDF", "Camera"])
+tab_upload, tab_camera = st.tabs(["Upload File", "Camera"])
 
 with tab_upload:
-    uploaded = st.file_uploader(
-        "Upload a mailpiece photo",
-        type=["jpg", "jpeg", "png", "webp", "heic"],
-        help="Clear, well-lit photos work best.",
-        key="img_uploader",
-    )
-
-with tab_pdf:
-    uploaded_pdf = st.file_uploader(
-        "Upload a PDF containing a mailpiece",
-        type=["pdf"],
-        help="Each page will be scanned for an IMB barcode.",
-        key="pdf_uploader",
+    uploaded_file = st.file_uploader(
+        "Upload a mailpiece image or PDF",
+        type=["jpg", "jpeg", "png", "webp", "heic", "pdf"],
+        help="Accepts images and PDFs. Clear, well-lit photos work best.",
+        key="file_uploader",
     )
 
 with tab_camera:
     camera_img = st.camera_input("Take a photo of a mailpiece")
 
-# ─── Process Image Upload or Camera ─────────────────────────────────────────────
+# ─── Process Upload or Camera ────────────────────────────────────────────────────
 
 pil_img = None
-if uploaded:
-    pil_img = Image.open(uploaded)
+uploaded_pdf = None
+
+if uploaded_file:
+    if uploaded_file.type == "application/pdf":
+        uploaded_pdf = uploaded_file
+    else:
+        pil_img = Image.open(uploaded_file)
 elif camera_img:
     pil_img = Image.open(camera_img)
 
