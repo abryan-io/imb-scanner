@@ -725,7 +725,11 @@ def print_result(r: dict) -> None:
 # =============================================================================
 
 if __name__ == "__main__":
+    from dotenv import load_dotenv
     from logging_config import setup_logging
+    from failed_scan_store import record_failure
+
+    load_dotenv()
 
     if len(sys.argv) < 2:
         print("Usage: python cli_app.py <image_path> [--debug]")
@@ -739,7 +743,17 @@ if __name__ == "__main__":
     try:
         result = process_image(image_path, debug=debug_mode)
         print_result(result)
-    except (ValueError, FileNotFoundError) as e:
+    except ValueError as e:
         logger.exception("pipeline failed | input=%s", image_path)
+        try:
+            gray = load_gray(image_path)
+            record_failure(gray, source=image_path, reason="no_decode_cli",
+                           attempts=["scan_image_robust"])
+        except Exception:
+            pass
+        print(f"\n[ERROR] {e}", file=sys.stderr)
+        sys.exit(1)
+    except FileNotFoundError as e:
+        logger.error("input not found | path=%s", image_path)
         print(f"\n[ERROR] {e}", file=sys.stderr)
         sys.exit(1)

@@ -11,6 +11,7 @@ import os
 import streamlit as st
 import cv2
 import numpy as np
+from dotenv import load_dotenv
 from PIL import Image
 import fitz  # PyMuPDF
 import openpyxl
@@ -19,7 +20,9 @@ from stid_table import lookup as stid_lookup, describe as stid_describe
 from cli_app import (detect_barcode_region, find_bar_runs, filter_to_65_bars,
                      classify_bars_fadt, scan_image_robust)
 from logging_config import setup_logging
+from failed_scan_store import record_failure
 
+load_dotenv()
 setup_logging()
 logger = logging.getLogger(__name__)
 
@@ -226,7 +229,7 @@ def display_scan_failure(fadt, debug_info):
         """)
 
 
-def display_image_scan(pil_img):
+def display_image_scan(pil_img, source_label: str = "unknown"):
     """Run scan and display full results for a single image."""
     col1, col2 = st.columns([1, 1])
 
@@ -276,6 +279,15 @@ def display_image_scan(pil_img):
         display_decode_result(result)
     else:
         display_scan_failure(fadt, debug_info)
+        location = record_failure(
+            pil_img,
+            source=source_label,
+            reason="no_decode_single_image",
+            attempts=["scan_image_robust"],
+            extra={"bar_count": debug_info.get("raw_bar_count")},
+        )
+        if location:
+            st.caption(f"Captured for later labeling: `{location}`")
 
 
 # ─── Streamlit UI ────────────────────────────────────────────────────────────────
@@ -307,7 +319,8 @@ elif camera_img:
     pil_img = Image.open(camera_img)
 
 if pil_img:
-    display_image_scan(pil_img)
+    source_label = uploaded_file.name if uploaded_file else "camera"
+    display_image_scan(pil_img, source_label=source_label)
 
 # ─── Process PDF Upload ─────────────────────────────────────────────────────────
 
@@ -326,6 +339,7 @@ if uploaded_pdf:
         st.write(f"**{total_pages} page{'s' if total_pages != 1 else ''}** detected. Scanning for IMB barcodes...")
 
         found_any = False
+        failed_pages: list[tuple[int, Image.Image]] = []
         progress = st.progress(0)
 
         for idx, (page_num, page_img) in enumerate(page_images):
@@ -339,7 +353,6 @@ if uploaded_pdf:
                 found_any = True
                 st.subheader(f"Page {page_num}")
 
-                # Show page thumbnail alongside results
                 thumb_col, result_col = st.columns([1, 2])
                 with thumb_col:
                     st.image(page_img, caption=f"Page {page_num}", use_container_width=True)
@@ -352,11 +365,27 @@ if uploaded_pdf:
                             st.code(fadt, language=None)
 
                 st.divider()
+            else:
+                failed_pages.append((page_num, page_img))
 
         progress.empty()
 
         if not found_any:
             st.warning("No IMB barcode found on any page of this PDF.")
+            captured = 0
+            pdf_source = uploaded_pdf.name if uploaded_pdf else "pdf"
+            for page_num, img in failed_pages[:5]:
+                location = record_failure(
+                    img,
+                    source=pdf_source,
+                    page=page_num,
+                    reason="no_decode_pdf_page",
+                    attempts=["scan_image_robust"],
+                )
+                if location:
+                    captured += 1
+            if captured:
+                st.caption(f"Captured {captured} page{'s' if captured != 1 else ''} for later labeling.")
 
 # ─── Sidebar ─────────────────────────────────────────────────────────────────────
 
