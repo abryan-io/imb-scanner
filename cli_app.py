@@ -18,10 +18,13 @@ Dependencies:
     pip install opencv-python-headless numpy
 """
 
+import logging
 import sys
 import numpy as np
 import cv2
 import intelligent_mail_barcode as imb
+
+logger = logging.getLogger(__name__)
 
 
 # =============================================================================
@@ -679,20 +682,21 @@ def process_image(image_path: str, debug: bool = False) -> dict:
     Returns dict with tracking, routing, barcode_id, service_type,
     mailer_id, serial, crc_ok, fadt.
     """
-    print(f"\n[IMb Pipeline] Input: {image_path}")
+    logger.info("pipeline start | input=%s", image_path)
 
     # Stage 1 — load
     gray = load_gray(image_path)
     H, W = gray.shape
-    print(f"  Loaded: {W}w x {H}h px")
+    logger.info("image loaded | width=%d height=%d", W, H)
 
     # Try robust scan first
     result = scan_image_robust(gray)
     if result is not None:
-        print(f"  FADT ({len(result['fadt'])} chars): {result['fadt']}")
-        print(f"  CRC OK: {result['crc_ok']}")
+        logger.info("decode success | fadt_len=%d crc_ok=%s tracking=%s",
+                    len(result['fadt']), result['crc_ok'], result.get('tracking'))
         return result
 
+    logger.warning("no IMB decoded | input=%s", image_path)
     raise ValueError("No IMB barcode detected or decoded from this image.")
 
 
@@ -721,20 +725,21 @@ def print_result(r: dict) -> None:
 # =============================================================================
 
 if __name__ == "__main__":
+    from logging_config import setup_logging
+
     if len(sys.argv) < 2:
-        print("Usage: python app.py <image_path> [--debug]")
-        print("  --debug   Save intermediate images for each pipeline stage")
+        print("Usage: python cli_app.py <image_path> [--debug]")
+        print("  --debug   Enable DEBUG-level logging")
         sys.exit(1)
 
     image_path = sys.argv[1]
     debug_mode = "--debug" in sys.argv
+    setup_logging(debug=debug_mode)
 
     try:
         result = process_image(image_path, debug=debug_mode)
         print_result(result)
-    except ValueError as e:
-        print(f"\n[ERROR] {e}")
-        sys.exit(1)
-    except FileNotFoundError as e:
-        print(f"\n[ERROR] {e}")
+    except (ValueError, FileNotFoundError) as e:
+        logger.exception("pipeline failed | input=%s", image_path)
+        print(f"\n[ERROR] {e}", file=sys.stderr)
         sys.exit(1)

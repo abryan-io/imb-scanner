@@ -6,6 +6,7 @@ Deterministic pipeline — no AI, no API calls.
 Run: streamlit run app.py
 """
 
+import logging
 import os
 import streamlit as st
 import cv2
@@ -17,6 +18,10 @@ import intelligent_mail_barcode as imb
 from stid_table import lookup as stid_lookup, describe as stid_describe
 from cli_app import (detect_barcode_region, find_bar_runs, filter_to_65_bars,
                      classify_bars_fadt, scan_image_robust)
+from logging_config import setup_logging
+
+setup_logging()
+logger = logging.getLogger(__name__)
 
 # ─── MID Lookup Table ────────────────────────────────────────────────────────────
 
