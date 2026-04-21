@@ -13,14 +13,14 @@ Streamlit app that detects and decodes USPS Intelligent Mail Barcodes (IMB) from
 ## Setup
 
 ```bash
-# Install dependencies
-pip install -r requirements.txt
+# Install dependencies (uv syncs .venv from pyproject.toml + uv.lock)
+uv sync
 
 # Run the Streamlit app
-streamlit run zapp.py
+uv run streamlit run app.py
 
-# Or run CLI on a single image
-python app.py <image_path>
+# Or run the CLI decoder on a single image
+uv run python cli_app.py <image_path>
 ```
 
 Then open http://localhost:8501 in your browser.
