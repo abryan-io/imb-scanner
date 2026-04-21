@@ -29,6 +29,8 @@ from PIL import Image
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_LOG_TAIL_LINES = 50
+
 
 def _backend() -> str:
     return os.environ.get("FAILED_SCAN_BACKEND", "local").lower()
@@ -36,6 +38,28 @@ def _backend() -> str:
 
 def _local_path() -> Path:
     return Path(os.environ.get("FAILED_SCAN_LOCAL_PATH", "./data/failed_scans"))
+
+
+def _read_log_tail(max_lines: int = DEFAULT_LOG_TAIL_LINES) -> list[str] | None:
+    """Return the last max_lines of the current run's log file, or None
+    if logging wasn't set up (e.g. unit tests that skip setup_logging).
+
+    Flushes the FileHandler first so the tail includes the most recent
+    records from this same process.
+    """
+    root = logging.getLogger()
+    log_path = getattr(root, "_usps_imb_log_file", None)
+    if not log_path:
+        return None
+    try:
+        for h in root.handlers:
+            if isinstance(h, logging.FileHandler):
+                h.flush()
+        with open(log_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+        return [line.rstrip("\n") for line in lines[-max_lines:]]
+    except Exception:
+        return None
 
 
 def _to_png_bytes(image: Any) -> bytes:
@@ -142,6 +166,7 @@ def record_failure(
             "attempts": attempts or [],
             "sha256_8": stem.rsplit("_", 1)[1],
             "backend": backend,
+            "log_tail": _read_log_tail(),
         }
         if extra:
             meta.update(extra)

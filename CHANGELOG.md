@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- `failed_scan_store.record_failure()` now embeds the last 50 lines of the current run's log file in each sidecar as `log_tail`. Gives you the diagnostic trail leading up to a failure — useful when pulling captures down from R2 where the source log file isn't available. Covered by 4 new tests in `tests/test_failed_scan_store.py`.
 - Pytest reporter in `conftest.py`: appends a JSON row per run to `test-results/history.jsonl` (timestamp, run_id, commit_sha, duration, pass/fail counts) and writes a per-run markdown summary.
 - `tools/label_corpus.py`: interactive CLI to walk captured `data/failed_scans/` sidecars and label each image with expected IMb fields. Writes the label block back into the same JSON so capture metadata is preserved.
 - `tests/test_label_corpus.py`: 23 unit tests covering the labeler validation (MID/serial length pairing, routing lengths, non-digit rejection).
