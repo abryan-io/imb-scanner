@@ -5,6 +5,9 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Pytest reporter in `conftest.py`: appends a JSON row per run to `test-results/history.jsonl` (timestamp, run_id, commit_sha, duration, pass/fail counts) and writes a per-run markdown summary.
+- `tools/label_corpus.py`: interactive CLI to walk captured `data/failed_scans/` sidecars and label each image with expected IMb fields. Writes the label block back into the same JSON so capture metadata is preserved.
+- `tests/test_label_corpus.py`: 23 unit tests covering the labeler validation (MID/serial length pairing, routing lengths, non-digit rejection).
 - `.gitignore` and `.env.example` establishing project conventions.
 - Scaffolding directories: `logs/`, `test-results/`, `tests/fixtures/`, `scratch/`, `data/`.
 - `conftest.py` with session-scoped `run_id` / `run_id_short` fixtures sourced from the `RUN_ID` env var so pytest artifacts share an identifier with the parent run.

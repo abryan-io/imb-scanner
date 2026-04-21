@@ -56,14 +56,20 @@ When the scanner can't decode an image, it writes the image + metadata to `FAILE
 - **`r2`**: Cloudflare R2 bucket (for Streamlit Cloud deploys — filesystem is ephemeral)
 - **`off`**: disabled
 
-Pull R2 failures to your machine for labeling:
+### Labeling workflow
 
-```bash
-# One-time rclone config: rclone config  (S3 provider, endpoint = your R2 endpoint URL)
-rclone sync r2:usps-imb-scanner ./data/failed_scans --progress
-```
-
-Labeled corpus feeds into future regression tests under `tests/fixtures/regression_corpus/`.
+1. **Pull from R2** (only needed when running from Streamlit Cloud):
+   ```bash
+   # One-time rclone config: rclone config  (S3 provider, endpoint = R2 endpoint URL)
+   rclone sync r2:usps-imb-scanner ./data/failed_scans --progress
+   ```
+2. **Label interactively**:
+   ```bash
+   uv run python tools/label_corpus.py
+   uv run python tools/label_corpus.py --open    # also open each image in default viewer
+   ```
+   The tool prompts for `barcode_id / stid / mid / serial / routing / notes` per image, validates lengths per the IMb spec, and writes a `labeled` block back into the sidecar JSON so the original capture metadata is preserved. Press Enter on the first field to skip an image; Ctrl-C to stop and resume later.
+3. **Promote to regression corpus** once labeled: move the `failed_*.png` + `failed_*.json` pair into `tests/fixtures/regression_corpus/`. A future regression test can iterate that directory and assert the scanner reproduces the labeled decode.
 
 ## Layout
 
@@ -77,10 +83,12 @@ USPS_IMB_Scanner/
 ├── failed_scan_store.py        Pluggable local/R2 capture of failed scans
 ├── MID_Lkp.xlsx                Mailer ID → company lookup
 ├── pyproject.toml / uv.lock    Dependency management
-├── conftest.py                 Pytest session setup (RUN_ID fixture)
+├── conftest.py                 Pytest session setup + reporters
+├── tools/
+│   └── label_corpus.py         Interactive labeler for captured failures
 ├── tests/                      pytest test suite + fixtures
 ├── logs/                       Run logs (gitignored, .gitkeep tracked)
-├── test-results/               JUnit XML + history.jsonl
+├── test-results/               JUnit XML + markdown summary + history.jsonl
 ├── data/failed_scans/          Captured failures (local backend, gitignored)
 └── scratch/                    Ad-hoc work (gitignored)
 ```
