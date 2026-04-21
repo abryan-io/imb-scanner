@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Credentials (keep .env.example tracked)
+.env
+*.pem
+*.key
+service-account*.json
+credentials.json
+
+# Data files — fixtures exception below
+*.csv
+*.parquet
+*.duckdb
+*.xlsx
+!MID_Lkp.xlsx
+!tests/fixtures/**
+
+# Logs and test results (keep structure markers)
+logs/*
+!logs/.gitkeep
+test-results/*
+!test-results/.gitkeep
+!test-results/history.jsonl
+
+# Scratch
+scratch/*
+!scratch/.gitkeep
+
+# Failed scan capture (synced to R2 in prod)
+data/failed_scans/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+desktop.ini
+Thumbs.db
+*.swp
+*.swo
