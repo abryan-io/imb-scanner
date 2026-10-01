@@ -4,13 +4,13 @@ Streamlit app that detects and decodes USPS Intelligent Mail Barcodes (IMB) from
 
 ## How it works
 
-1. **Sobel-X edge density** finds the barcode band (the row with the densest vertical edges)
-2. **Otsu binarization + 4x upscale** produces a clean binary crop
-3. **Column projection** locates 65 bar centers with outlier filtering for text artifacts
-4. **Largest-gap clustering** classifies each bar as F/A/D/T by measuring top/bottom pixel extent
-5. **pyimb decode** converts FADT → codewords → tracking + routing (CRC-11 validated)
-
-The robust scanner tries multiple detection strategies (multi-candidate Sobel peaks, CLAHE-enhanced, morphological, inverted, horizontal strip scan) and four binarization variants per region.
+1. **Normalize** — images larger than 3300px on the long side are downscaled; noisy images (estimated σ > 5) get a 5×5 Gaussian blur
+2. **Orient** — the dominant near-vertical edge angle is measured and the image deskewed; if nothing decodes upright, the image is retried rotated 90°. Upside-down barcodes are handled by decoding every read in both directions
+3. **Locate** — Sobel-X row energy (multi-candidate, plus CLAHE / morphological / inverted / strip-scan fallbacks) finds the barcode band
+4. **Binarize** — five variants per region: Otsu, CLAHE+Otsu, adaptive Gaussian, background-flattened Otsu (uneven lighting), inverted Otsu
+5. **Segment** into 65 bars, trying in order: column projection; bar-shaped connected components along a common tilted line (ignores nearby text); a regular pitch grid fitted to bar centers (recovers merged/split bars)
+6. **Classify** F/A/D/T relative to a line fitted through the bars' tracker band, so skew and perspective don't shift the thresholds. Each bar gets a confidence score
+7. **Decode** with pyimb (CRC-11). If nothing decodes cleanly, near-miss reads (≤ 2 invalid codewords) are repaired by flipping only the lowest-confidence bars, and accepted only if the CRC passes. Repaired decodes carry `corrected_bars`
 
 ## Setup
 
@@ -44,7 +44,15 @@ Copy `.env.example` to `.env` and fill in values:
 uv run pytest tests/ -v
 ```
 
-Corpus lives in `tests/fixtures/` — 17 PDFs + 6 PNGs. Filenames encode expected IMB values (`BarcodeID_STID_MID_Serial.{pdf,png}`) so each test reads the truth from the filename.
+Corpus lives in `tests/fixtures/` — 17 PDFs + 6 PNGs. PDF filenames encode the expected values (`BarcodeID_STID_MID_Serial.pdf`); PNG filenames are the full IMB number (20-digit tracking + routing). Each test reads the truth from the filename.
+
+`tests/test_scanner_units.py` covers skew, 90°/180° rotation, scale, noise, and error correction on synthetically rendered barcodes (fast).
+
+The robustness suite (`tests/test_robustness.py`) re-scans the corpus under seeded distortions — rotation, scale, blur, JPEG, noise, shading, perspective, and a phone-photo combination — and asserts a minimum decode rate per distortion. It takes ~10 minutes serially, so it is excluded by default:
+
+```bash
+uv run pytest -m robustness -n auto
+```
 
 Test artifacts land in `test-results/` (junit XML per run, plus `history.jsonl`). Logs land in `logs/` with the same `run_id_short` so they line up.
 

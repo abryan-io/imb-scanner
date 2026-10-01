@@ -12,7 +12,8 @@ import streamlit as st
 import cv2
 import numpy as np
 from dotenv import load_dotenv
-from PIL import Image
+from PIL import Image, ImageOps
+from pillow_heif import register_heif_opener
 import fitz  # PyMuPDF
 import openpyxl
 import intelligent_mail_barcode as imb
@@ -24,6 +25,7 @@ from failed_scan_store import record_failure
 
 load_dotenv()
 setup_logging()
+register_heif_opener()
 logger = logging.getLogger(__name__)
 
 # ─── MID Lookup Table ────────────────────────────────────────────────────────────
@@ -97,9 +99,13 @@ def scan_image(pil_img: Image.Image):
     annotated = img_rgb.copy()
 
     # Use robust multi-strategy scanner
-    result = scan_image_robust(gray)
+    diagnostics = {}
+    result = scan_image_robust(gray, diagnostics)
 
     if result is None:
+        near_miss_fadt = diagnostics.get('near_miss_fadt')
+        if near_miss_fadt:
+            debug_info['near_miss_fadt'] = near_miss_fadt
         # Show best candidate region for debugging
         region = detect_barcode_region(gray)
         if region is not None:
@@ -114,8 +120,8 @@ def scan_image(pil_img: Image.Image):
             cv2.putText(annotated, "candidate (failed)", (x1, y1 - 6),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 200), 1)
             crop_rgb = img_rgb[y1:y2, x1:x2]
-            return None, annotated, crop_rgb, None, "No IMB decoded", debug_info
-        return None, annotated, None, None, "No IMB region detected", debug_info
+            return None, annotated, crop_rgb, near_miss_fadt, "No IMB decoded", debug_info
+        return None, annotated, None, near_miss_fadt, "No IMB region detected", debug_info
 
     fadt = result.get('fadt', '')
     debug_info['fadt'] = fadt
@@ -133,6 +139,9 @@ def display_decode_result(result):
 
     st.success(f"Decoded: `{full_number}`")
     st.caption(f"CRC: {'PASS' if result['crc_ok'] else 'FAIL'}")
+    if result.get('corrected_bars'):
+        st.caption(f"Error-corrected {result['corrected_bars']} low-confidence bar(s) "
+                   "before the CRC passed")
 
     st.subheader("IMB Components")
 
@@ -216,10 +225,6 @@ def display_scan_failure(fadt, debug_info):
             "Try a higher-resolution or tighter-cropped photo."
         )
     else:
-        n = debug_info.get('raw_bar_count', 0)
-        if n:
-            st.warning(f"Found {n} bars instead of 65. "
-                       "Barcode may be cut off, blurry, or at an angle.")
         st.markdown("""
         **Tips for better results:**
         - Make sure the IMB is in focus and well-lit
@@ -284,7 +289,7 @@ def display_image_scan(pil_img, source_label: str = "unknown"):
             source=source_label,
             reason="no_decode_single_image",
             attempts=["scan_image_robust"],
-            extra={"bar_count": debug_info.get("raw_bar_count")},
+            extra={"near_miss_fadt": fadt},
         )
         if location:
             st.caption(f"Captured for later labeling: `{location}`")
@@ -314,9 +319,9 @@ if uploaded_file:
     if uploaded_file.type == "application/pdf":
         uploaded_pdf = uploaded_file
     else:
-        pil_img = Image.open(uploaded_file)
+        pil_img = ImageOps.exif_transpose(Image.open(uploaded_file))
 elif camera_img:
-    pil_img = Image.open(camera_img)
+    pil_img = ImageOps.exif_transpose(Image.open(camera_img))
 
 if pil_img:
     source_label = uploaded_file.name if uploaded_file else "camera"
@@ -419,11 +424,12 @@ with st.sidebar:
     st.divider()
     st.header("Pipeline")
     st.markdown("""
-    1. Sobel-X edge density → barcode row
-    2. Crop + Otsu binarize + 4x upscale
-    3. Column projection → 65 bar runs
-    4. Largest-gap clustering → FADT
-    5. pyimb decode (CRC-11 validated)
+    1. Normalize scale, denoise, deskew, try 0°/90°/180°
+    2. Sobel-X / morphological detection → barcode band
+    3. Crop + five binarizations
+    4. Column projection, tilted-line components, or pitch grid → 65 bars
+    5. Line-fit FADT classification with per-bar confidence
+    6. pyimb decode (CRC-11), repairing weak bars if needed
 
     No AI · No API · Fully offline
     """)

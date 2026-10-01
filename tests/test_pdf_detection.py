@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 PDF_FILES = sorted(glob.glob(str(FIXTURES_DIR / "*.pdf")))
+PNG_FILES = sorted(glob.glob(str(FIXTURES_DIR / "*.png")))
 
 
 def _parse_expected(pdf_path: str) -> dict | None:
@@ -100,3 +101,12 @@ def test_pdf_decodes_expected_imb(pdf_path: str, run_id_short: str):
         f"expected tracking={expected['tracking']} not found. "
         f"Decoded: [{found}] in {elapsed:.2f}s"
     )
+
+
+@pytest.mark.parametrize("png_path", PNG_FILES, ids=lambda p: os.path.basename(p))
+def test_png_decodes_expected_imb(png_path: str):
+    """PNG fixtures are named by the full IMB number: 20-digit tracking + routing."""
+    expected = os.path.splitext(os.path.basename(png_path))[0]
+    gray = cv2.imread(png_path, cv2.IMREAD_GRAYSCALE)
+    full_numbers = [r["tracking"] + r["routing"] for r in scan_image_robust_all(gray)]
+    assert expected in full_numbers
