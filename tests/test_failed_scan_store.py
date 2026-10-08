@@ -1,4 +1,5 @@
 """Tests for failed_scan_store."""
+
 from __future__ import annotations
 
 import json

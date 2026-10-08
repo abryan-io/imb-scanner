@@ -15,6 +15,7 @@ Usage:
 After labeling, move the image + sidecar pair into
 tests/fixtures/regression_corpus/ to fold it into the pytest corpus.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -42,6 +43,7 @@ def validate_labels(raw: dict[str, str]) -> dict[str, Any]:
       - routing    : 0, 5, 9, or 11 digits (optional — empty string allowed)
       - notes      : free text (optional)
     """
+
     def digits(key: str, value: str) -> str:
         v = (value or "").strip()
         if not v.isdigit():
@@ -64,17 +66,14 @@ def validate_labels(raw: dict[str, str]) -> dict[str, Any]:
     expected_serial = 9 if len(mid) == 6 else 6
     if len(serial) != expected_serial:
         raise ValidationError(
-            f"serial must be {expected_serial} digits when mid is {len(mid)}, "
-            f"got {len(serial)}"
+            f"serial must be {expected_serial} digits when mid is {len(mid)}, got {len(serial)}"
         )
 
     routing_raw = (raw.get("routing") or "").strip()
     if routing_raw and not routing_raw.isdigit():
         raise ValidationError(f"routing: expected digits, got {routing_raw!r}")
     if len(routing_raw) not in (0, 5, 9, 11):
-        raise ValidationError(
-            f"routing must be 0, 5, 9, or 11 digits, got {len(routing_raw)}"
-        )
+        raise ValidationError(f"routing must be 0, 5, 9, or 11 digits, got {len(routing_raw)}")
 
     notes = (raw.get("notes") or "").strip()
 
@@ -173,12 +172,15 @@ def label_one(sidecar_path: Path, open_image: bool = False) -> bool:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--dir", default="data/failed_scans",
-                        help="Directory of failed_*.json sidecars")
-    parser.add_argument("--include-labeled", action="store_true",
-                        help="Also prompt for already-labeled entries")
-    parser.add_argument("--open", action="store_true",
-                        help="Open each image in the OS default viewer")
+    parser.add_argument(
+        "--dir", default="data/failed_scans", help="Directory of failed_*.json sidecars"
+    )
+    parser.add_argument(
+        "--include-labeled", action="store_true", help="Also prompt for already-labeled entries"
+    )
+    parser.add_argument(
+        "--open", action="store_true", help="Open each image in the OS default viewer"
+    )
     args = parser.parse_args(argv)
 
     root = Path(args.dir)
@@ -192,12 +194,12 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     targets = [
-        s for s in all_sidecars
-        if args.include_labeled or not is_labeled(json.loads(s.read_text()))
+        s for s in all_sidecars if args.include_labeled or not is_labeled(json.loads(s.read_text()))
     ]
     if not targets:
-        print(f"All {len(all_sidecars)} entries already labeled "
-              f"(use --include-labeled to re-review).")
+        print(
+            f"All {len(all_sidecars)} entries already labeled (use --include-labeled to re-review)."
+        )
         return 0
 
     print(f"Labeling {len(targets)} entries from {root}")

@@ -1,4 +1,5 @@
 """Fast scanner tests on synthetically rendered IMBs (no PDF corpus needed)."""
+
 from __future__ import annotations
 
 import cv2
@@ -20,9 +21,10 @@ def _render(fadt: str, pitch: int = 15, bar_w: int = 7) -> np.ndarray:
         x = x0 + i * pitch
         top = y0 if ch in "AF" else y0 + 20
         bottom = y0 + 60 if ch in "DF" else y0 + 40
-        img[top:bottom, x:x + bar_w] = 0
-    cv2.putText(img, "PO BOX 4175 CAROL STREAM IL", (x0, y0 - 30),
-                cv2.FONT_HERSHEY_SIMPLEX, 1.2, 0, 3)
+        img[top:bottom, x : x + bar_w] = 0
+    cv2.putText(
+        img, "PO BOX 4175 CAROL STREAM IL", (x0, y0 - 30), cv2.FONT_HERSHEY_SIMPLEX, 1.2, 0, 3
+    )
     return img
 
 
@@ -45,9 +47,14 @@ def test_decodes_skewed_barcode(angle):
     assert TRACKING in _trackings(cli_app.rotate_image(_render(FADT), angle))
 
 
-@pytest.mark.parametrize("rotation", [
-    cv2.ROTATE_90_CLOCKWISE, cv2.ROTATE_180, cv2.ROTATE_90_COUNTERCLOCKWISE,
-])
+@pytest.mark.parametrize(
+    "rotation",
+    [
+        cv2.ROTATE_90_CLOCKWISE,
+        cv2.ROTATE_180,
+        cv2.ROTATE_90_COUNTERCLOCKWISE,
+    ],
+)
 def test_decodes_rotated_barcode(rotation):
     assert TRACKING in _trackings(cv2.rotate(_render(FADT), rotation))
 
@@ -126,10 +133,11 @@ def test_noise_estimate_separates_clean_from_noisy():
 def _distant_webcam_frame() -> np.ndarray:
     """Low-contrast barcode at ~2.7px bar pitch, blurred and JPEG-compressed,
     in a 704x396 frame like Streamlit's camera input."""
-    small = cv2.resize(_render(FADT), None, fx=0.18, fy=0.18,
-                       interpolation=cv2.INTER_AREA).astype(np.float32)
+    small = cv2.resize(_render(FADT), None, fx=0.18, fy=0.18, interpolation=cv2.INTER_AREA).astype(
+        np.float32
+    )
     frame = np.full((396, 704), 235, np.float32)
-    frame[150:150 + small.shape[0], 200:200 + small.shape[1]] = 235 - (235 - small) * 0.5
+    frame[150 : 150 + small.shape[0], 200 : 200 + small.shape[1]] = 235 - (235 - small) * 0.5
     frame = cv2.GaussianBlur(frame, (0, 0), 0.6)
     ok, buf = cv2.imencode(".jpg", frame.astype(np.uint8), [cv2.IMWRITE_JPEG_QUALITY, 80])
     return cv2.imdecode(buf, cv2.IMREAD_GRAYSCALE)

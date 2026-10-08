@@ -7,20 +7,24 @@ Run: streamlit run app.py
 """
 
 import logging
-import streamlit as st
+
 import cv2
+import fitz  # PyMuPDF
 import numpy as np
+import streamlit as st
 from dotenv import load_dotenv
 from PIL import Image, ImageOps
 from pillow_heif import register_heif_opener
-import fitz  # PyMuPDF
-import intelligent_mail_barcode as imb
+
 import mid_lookup
-from stid_table import lookup as stid_lookup, describe as stid_describe
-from cli_app import (detect_barcode_region, find_bar_runs, filter_to_65_bars,
-                     classify_bars_fadt, scan_image_robust)
-from logging_config import setup_logging
+from cli_app import (
+    detect_barcode_region,
+    scan_image_robust,
+)
 from failed_scan_store import record_failure
+from logging_config import setup_logging
+from stid_table import describe as stid_describe
+from stid_table import lookup as stid_lookup
 from unknown_mid_log import record_unknown_mid
 
 load_dotenv()
@@ -30,14 +34,17 @@ logger = logging.getLogger(__name__)
 
 # ─── MID Lookup Table ────────────────────────────────────────────────────────────
 
+
 @st.cache_data
 def load_mid_table():
     return mid_lookup.load_mid_table()
+
 
 mid_table = load_mid_table()
 
 
 # ─── PDF Conversion ─────────────────────────────────────────────────────────────
+
 
 def pdf_to_pil_images(pdf_bytes, dpi=300):
     """Convert PDF bytes to list of (page_num, PIL Image) tuples."""
@@ -67,6 +74,7 @@ st.caption("Deterministic IMB detection · no AI · just pixels and math")
 
 # ─── Main Pipeline ──────────────────────────────────────────────────────────────
 
+
 def scan_image(pil_img: Image.Image):
     """
     Full pipeline: image → decoded IMB.
@@ -85,74 +93,84 @@ def scan_image(pil_img: Image.Image):
     result = scan_image_robust(gray, diagnostics)
 
     if result is None:
-        near_miss_fadt = diagnostics.get('near_miss_fadt')
+        near_miss_fadt = diagnostics.get("near_miss_fadt")
         if near_miss_fadt:
-            debug_info['near_miss_fadt'] = near_miss_fadt
+            debug_info["near_miss_fadt"] = near_miss_fadt
         # Show best candidate region for debugging
         region = detect_barcode_region(gray)
         if region is not None:
             x, y, w, h = region
-            debug_info['region'] = {'x': x, 'y': y, 'w': w, 'h': h}
+            debug_info["region"] = {"x": x, "y": y, "w": w, "h": h}
             pad = 4
             x1 = max(0, x - pad)
             y1 = max(0, y - pad)
             x2 = min(W, x + w + pad)
             y2 = min(H, y + h + pad)
             cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 0, 200), 2)
-            cv2.putText(annotated, "candidate (failed)", (x1, y1 - 6),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 200), 1)
+            cv2.putText(
+                annotated,
+                "candidate (failed)",
+                (x1, y1 - 6),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.55,
+                (0, 0, 200),
+                1,
+            )
             crop_rgb = img_rgb[y1:y2, x1:x2]
             return None, annotated, crop_rgb, near_miss_fadt, "No IMB decoded", debug_info
         return None, annotated, None, near_miss_fadt, "No IMB region detected", debug_info
 
-    fadt = result.get('fadt', '')
-    debug_info['fadt'] = fadt
+    fadt = result.get("fadt", "")
+    debug_info["fadt"] = fadt
     method = "Multi-strategy robust scanner"
     return result, annotated, None, fadt, method, debug_info
 
 
 # ─── Result Display (shared by image & PDF paths) ───────────────────────────────
 
+
 def display_decode_result(result, source_label: str = "unknown"):
     """Display a successfully decoded IMB result with MID lookup."""
-    tracking = result['tracking']
-    routing = result.get('routing', '')
+    tracking = result["tracking"]
+    routing = result.get("routing", "")
     full_number = tracking + routing
 
     st.success(f"Decoded: `{full_number}`")
     st.caption(f"CRC: {'PASS' if result['crc_ok'] else 'FAIL'}")
-    if result.get('corrected_bars'):
-        st.caption(f"Error-corrected {result['corrected_bars']} low-confidence bar(s) "
-                   "before the CRC passed")
+    if result.get("corrected_bars"):
+        st.caption(
+            f"Error-corrected {result['corrected_bars']} low-confidence bar(s) "
+            "before the CRC passed"
+        )
 
     st.subheader("IMB Components")
 
     col_a, col_b, col_c = st.columns(3)
-    col_a.metric("Barcode ID", result['barcode_id'])
-    col_b.metric("Service Type (STID)", result['service_type'])
+    col_a.metric("Barcode ID", result["barcode_id"])
+    col_b.metric("Service Type (STID)", result["service_type"])
 
-    mid = result['mailer_id']
+    mid = result["mailer_id"]
     mid_len = len(mid)
     col_c.metric("MID Length", f"{mid_len}-digit")
 
     col_d, col_e = st.columns(2)
     col_d.metric("Mailer ID (MID)", mid)
-    col_e.metric("Serial Number", result['serial'])
+    col_e.metric("Serial Number", result["serial"])
 
     # MID lookup
     mid_info = mid_table.get(mid)
     if mid_info:
         st.subheader("Mailer Info (MID Lookup)")
         m1, m2 = st.columns(2)
-        m1.metric("Company", mid_info['Company'])
-        m2.metric("BID", mid_info['BID'])
+        m1.metric("Company", mid_info["Company"])
+        m2.metric("BID", mid_info["BID"])
         st.write(f"**Address:** {mid_info['Address']}")
     else:
         st.caption("MID not found in lookup table — logged for manual lookup")
         record_unknown_mid(result, source=source_label)
 
     # STID lookup
-    stid_info = stid_lookup(result['service_type'])
+    stid_info = stid_lookup(result["service_type"])
     if stid_info:
         st.info(f"STID {result['service_type']}: {stid_describe(result['service_type'])}")
 
@@ -234,18 +252,17 @@ def display_image_scan(pil_img, source_label: str = "unknown"):
 
     if crop is not None:
         st.subheader("Detected IMB Region")
-        crop_large = cv2.resize(crop, None, fx=4, fy=4,
-                                interpolation=cv2.INTER_CUBIC)
+        crop_large = cv2.resize(crop, None, fx=4, fy=4, interpolation=cv2.INTER_CUBIC)
         st.image(crop_large, use_container_width=True)
 
     if fadt is not None:
         st.subheader("Extracted FADT String (65 bars)")
         st.code(fadt, language=None)
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Full (F)", fadt.count('F'))
-        c2.metric("Ascender (A)", fadt.count('A'))
-        c3.metric("Descender (D)", fadt.count('D'))
-        c4.metric("Tracker (T)", fadt.count('T'))
+        c1.metric("Full (F)", fadt.count("F"))
+        c2.metric("Ascender (A)", fadt.count("A"))
+        c3.metric("Descender (D)", fadt.count("D"))
+        c4.metric("Tracker (T)", fadt.count("T"))
 
     # Debug expander
     with st.expander("Debug: edge map & row energy"):
@@ -324,7 +341,10 @@ if uploaded_pdf:
 
     if page_images:
         total_pages = len(page_images)
-        st.write(f"**{total_pages} page{'s' if total_pages != 1 else ''}** detected. Scanning for IMB barcodes...")
+        st.write(
+            f"**{total_pages} page{'s' if total_pages != 1 else ''}** detected. "
+            "Scanning for IMB barcodes..."
+        )
 
         found_any = False
         failed_pages: list[tuple[int, Image.Image]] = []
@@ -347,7 +367,7 @@ if uploaded_pdf:
                 with result_col:
                     display_decode_result(result, f"{uploaded_pdf.name} p{page_num}")
 
-                    fadt = result.get('fadt', '')
+                    fadt = result.get("fadt", "")
                     if fadt:
                         with st.expander("FADT String"):
                             st.code(fadt, language=None)
@@ -373,7 +393,9 @@ if uploaded_pdf:
                 if location:
                     captured += 1
             if captured:
-                st.caption(f"Captured {captured} page{'s' if captured != 1 else ''} for later labeling.")
+                st.caption(
+                    f"Captured {captured} page{'s' if captured != 1 else ''} for later labeling."
+                )
 
 # ─── Sidebar ─────────────────────────────────────────────────────────────────────
 

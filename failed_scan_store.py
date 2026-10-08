@@ -13,6 +13,7 @@ Metadata includes source (filename / page), attempts tried, run_id,
 image dimensions, and reason — enough to reconstruct what the scanner
 saw when it gave up.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -55,7 +56,7 @@ def _read_log_tail(max_lines: int = DEFAULT_LOG_TAIL_LINES) -> list[str] | None:
         for h in root.handlers:
             if isinstance(h, logging.FileHandler):
                 h.flush()
-        with open(log_path, "r", encoding="utf-8") as f:
+        with open(log_path, encoding="utf-8") as f:
             lines = f.readlines()
         return [line.rstrip("\n") for line in lines[-max_lines:]]
     except Exception:
@@ -184,8 +185,13 @@ def record_failure(
             logger.warning("unknown FAILED_SCAN_BACKEND=%s — skipping capture", backend)
             return None
 
-        logger.info("captured failed scan | backend=%s location=%s source=%s reason=%s",
-                    backend, location, source, reason)
+        logger.info(
+            "captured failed scan | backend=%s location=%s source=%s reason=%s",
+            backend,
+            location,
+            source,
+            reason,
+        )
         return location
     except Exception:
         logger.exception("failed_scan_store: capture failed (non-fatal)")

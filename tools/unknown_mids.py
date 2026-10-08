@@ -11,6 +11,7 @@ Usage:
     uv run python tools/unknown_mids.py --backend r2 # what the Streamlit app logged
     uv run python tools/unknown_mids.py --all        # include MIDs now in the lookup
 """
+
 from __future__ import annotations
 
 import argparse
@@ -31,24 +32,30 @@ def format_rows(records: list[dict], known_mids: set[str], include_known: bool) 
     for r in records:
         if r["mid"] in known_mids and not include_known:
             continue
-        rows.append("\t".join([
-            r["mid"],
-            str(len(r["pieces"])),
-            r["first_seen"],
-            r.get("last_seen", r["first_seen"]),
-            ",".join(r["service_types"]),
-            ",".join(r["barcode_ids"]),
-            "; ".join(r["sources"]),
-        ]))
+        rows.append(
+            "\t".join(
+                [
+                    r["mid"],
+                    str(len(r["pieces"])),
+                    r["first_seen"],
+                    r.get("last_seen", r["first_seen"]),
+                    ",".join(r["service_types"]),
+                    ",".join(r["barcode_ids"]),
+                    "; ".join(r["sources"]),
+                ]
+            )
+        )
     return rows
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--backend", choices=["local", "r2"],
-                        help="override FAILED_SCAN_BACKEND from .env")
-    parser.add_argument("--all", action="store_true",
-                        help="include MIDs that are now in MID_Lkp.xlsx")
+    parser.add_argument(
+        "--backend", choices=["local", "r2"], help="override FAILED_SCAN_BACKEND from .env"
+    )
+    parser.add_argument(
+        "--all", action="store_true", help="include MIDs that are now in MID_Lkp.xlsx"
+    )
     args = parser.parse_args(argv)
 
     load_dotenv(ROOT / ".env")

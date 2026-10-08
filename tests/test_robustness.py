@@ -8,6 +8,7 @@ Raise a floor when an improvement lands; never lower one to make CI pass.
 Slow (~10 min serial), so excluded by default. Run with:
     uv run pytest -m robustness -n auto
 """
+
 from __future__ import annotations
 
 import logging

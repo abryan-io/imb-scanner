@@ -1,4 +1,5 @@
 """Mailer ID → company lookup, loaded from MID_Lkp.xlsx."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -30,8 +31,8 @@ def load_mid_table(path: Path = MID_LKP_PATH) -> dict[str, dict[str, str]]:
     for row in rows:
         if len(row) >= 4 and row[0] is not None:
             table[normalize_mid(row[0])] = {
-                'BID': str(int(row[1])) if isinstance(row[1], (int, float)) else str(row[1] or ''),
-                'Company': str(row[2] or ''),
-                'Address': str(row[3] or ''),
+                "BID": str(int(row[1])) if isinstance(row[1], (int, float)) else str(row[1] or ""),
+                "Company": str(row[2] or ""),
+                "Address": str(row[3] or ""),
             }
     return table

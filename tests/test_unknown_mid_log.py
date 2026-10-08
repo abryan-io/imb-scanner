@@ -1,4 +1,5 @@
 """Tests for mid_lookup normalization and the unknown-MID log."""
+
 from __future__ import annotations
 
 import json
@@ -15,14 +16,17 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "tools"))
 from unknown_mids import format_rows  # noqa: E402
 
 
-@pytest.mark.parametrize("raw, expected", [
-    (128, "000128"),
-    (128.0, "000128"),
-    (" 000128 ", "000128"),
-    (271128, "271128"),
-    (906894001, "906894001"),
-    ("abc", "abc"),
-])
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        (128, "000128"),
+        (128.0, "000128"),
+        (" 000128 ", "000128"),
+        (271128, "271128"),
+        (906894001, "906894001"),
+        ("abc", "abc"),
+    ],
+)
 def test_normalize_mid_restores_leading_zeros(raw, expected):
     assert normalize_mid(raw) == expected
 
@@ -39,8 +43,14 @@ def local_log(tmp_path, monkeypatch):
 
 
 def _result(tracking: str, mid: str = "123456", stid: str = "271") -> dict:
-    return {"tracking": tracking, "mailer_id": mid, "service_type": stid,
-            "barcode_id": "00", "routing": "80234275425", "serial": "999"}
+    return {
+        "tracking": tracking,
+        "mailer_id": mid,
+        "service_type": stid,
+        "barcode_id": "00",
+        "routing": "80234275425",
+        "serial": "999",
+    }
 
 
 def test_records_new_mid(local_log):

@@ -4,6 +4,7 @@ Each fixture PDF is named BarcodeID_STID_MID_Serial.pdf so the expected
 decode is encoded in the filename. Any page of the PDF that yields a
 CRC-valid decode matching the expected tuple passes the test.
 """
+
 from __future__ import annotations
 
 import glob
@@ -87,7 +88,10 @@ def test_pdf_decodes_expected_imb(pdf_path: str, run_id_short: str):
                 elapsed = time.time() - start
                 logger.info(
                     "pdf pass | file=%s page=%d elapsed=%.2fs run_id_short=%s",
-                    os.path.basename(pdf_path), page_num, elapsed, run_id_short,
+                    os.path.basename(pdf_path),
+                    page_num,
+                    elapsed,
+                    run_id_short,
                 )
                 return
 
@@ -95,11 +99,13 @@ def test_pdf_decodes_expected_imb(pdf_path: str, run_id_short: str):
     found = ", ".join(d["tracking"] for d in decodes) or "none"
     logger.warning(
         "pdf fail | file=%s elapsed=%.2fs decodes=%s expected=%s",
-        os.path.basename(pdf_path), elapsed, found, expected["tracking"],
+        os.path.basename(pdf_path),
+        elapsed,
+        found,
+        expected["tracking"],
     )
     pytest.fail(
-        f"expected tracking={expected['tracking']} not found. "
-        f"Decoded: [{found}] in {elapsed:.2f}s"
+        f"expected tracking={expected['tracking']} not found. Decoded: [{found}] in {elapsed:.2f}s"
     )
 
 

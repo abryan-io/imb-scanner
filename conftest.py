@@ -5,6 +5,7 @@
 - Appends one line per run to test-results/history.jsonl.
 - Writes a markdown summary per run to test-results/run_{ts}_{sha}.md.
 """
+
 from __future__ import annotations
 
 import json
@@ -16,7 +17,6 @@ from datetime import datetime
 from pathlib import Path
 
 import pytest
-
 
 RESULTS_DIR = Path("test-results")
 HISTORY_PATH = RESULTS_DIR / "history.jsonl"
@@ -36,7 +36,9 @@ def _git_sha() -> str:
     try:
         r = subprocess.run(
             ["git", "rev-parse", "HEAD"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         return r.stdout.strip() if r.returncode == 0 else ""
     except Exception:
@@ -94,8 +96,12 @@ def _write_markdown(md_path: Path, entry: dict, stats: dict) -> None:
     lines.append("")
     lines.append("| Test | Status | Duration |")
     lines.append("|---|---|---|")
-    for status, icon in [("passed", "PASS"), ("failed", "FAIL"),
-                         ("skipped", "SKIP"), ("error", "ERR")]:
+    for status, icon in [
+        ("passed", "PASS"),
+        ("failed", "FAIL"),
+        ("skipped", "SKIP"),
+        ("error", "ERR"),
+    ]:
         for r in stats.get(status, []):
             lines.append(f"| `{r.nodeid}` | {icon} | {getattr(r, 'duration', 0):.2f}s |")
     lines.append("")

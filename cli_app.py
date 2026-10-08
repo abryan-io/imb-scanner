@@ -24,8 +24,9 @@ import logging
 import sys
 from dataclasses import dataclass
 
-import numpy as np
 import cv2
+import numpy as np
+
 import intelligent_mail_barcode as imb
 
 logger = logging.getLogger(__name__)
@@ -51,6 +52,7 @@ EC_MAX_NEAR_MISSES = 40
 # STAGE 1 — IMAGE LOADING & GRAYSCALE
 # =============================================================================
 
+
 def load_gray(image_path: str) -> np.ndarray:
     img = cv2.imread(image_path)
     if img is None:
@@ -61,6 +63,7 @@ def load_gray(image_path: str) -> np.ndarray:
 # =============================================================================
 # STAGE 2 — SCALE & ORIENTATION NORMALIZATION
 # =============================================================================
+
 
 def normalize_scale(gray: np.ndarray) -> np.ndarray:
     long_side = max(gray.shape)
@@ -124,8 +127,9 @@ def rotate_image(gray: np.ndarray, angle: float) -> np.ndarray:
     nw, nh = int(h * sin + w * cos), int(h * cos + w * sin)
     M[0, 2] += nw / 2 - w / 2
     M[1, 2] += nh / 2 - h / 2
-    return cv2.warpAffine(gray, M, (nw, nh), flags=cv2.INTER_LINEAR,
-                          borderMode=cv2.BORDER_REPLICATE)
+    return cv2.warpAffine(
+        gray, M, (nw, nh), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE
+    )
 
 
 def _deskewed_views(gray: np.ndarray):
@@ -139,6 +143,7 @@ def _deskewed_views(gray: np.ndarray):
 # =============================================================================
 # STAGE 3 — BARCODE REGION DETECTION (multi-strategy)
 # =============================================================================
+
 
 def detect_barcode_region(gray: np.ndarray):
     """
@@ -200,7 +205,7 @@ def detect_barcode_candidates(gray: np.ndarray, max_candidates: int = 10):
 
     row_energy = edge.sum(axis=1)
     ks = max(3, H // 60)
-    row_energy_smooth = np.convolve(row_energy, np.ones(ks) / ks, mode='same')
+    row_energy_smooth = np.convolve(row_energy, np.ones(ks) / ks, mode="same")
 
     # Find local maxima in row energy profile
     peaks = _find_energy_peaks(row_energy_smooth, min_distance=max(10, H // 40))
@@ -236,7 +241,7 @@ def detect_barcode_candidates(gray: np.ndarray, max_candidates: int = 10):
         aspect_score = min(aspect / 10.0, 2.0)
 
         # Energy density in the region
-        region_energy = row_energy_smooth[y:y+h].mean()
+        region_energy = row_energy_smooth[y : y + h].mean()
         energy_score = region_energy / (row_energy_smooth.max() + 1e-9)
 
         score = aspect_score * height_score * energy_score
@@ -288,8 +293,7 @@ def detect_barcode_candidates_morphological(gray: np.ndarray):
 
     # Adaptive threshold to handle varying backgrounds
     binary = cv2.adaptiveThreshold(
-        gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-        cv2.THRESH_BINARY_INV, 15, 5
+        gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 15, 5
     )
 
     # Morphological: enhance vertical bars, suppress horizontal structures
@@ -321,6 +325,7 @@ def detect_barcode_candidates_morphological(gray: np.ndarray):
 # STAGE 4 — BAR SEGMENTATION
 # =============================================================================
 
+
 def find_bar_runs(binary: np.ndarray):
     """
     Find contiguous vertical bar runs from column projection of a binary image.
@@ -329,7 +334,7 @@ def find_bar_runs(binary: np.ndarray):
     _, uw = binary.shape
     col_sum = binary.sum(axis=0)
     kernel = np.ones(3, dtype=np.float32) / 3.0
-    col_smooth = np.convolve(col_sum.astype(np.float32), kernel, mode='same')
+    col_smooth = np.convolve(col_sum.astype(np.float32), kernel, mode="same")
 
     ink_thr = col_smooth.max() * 0.05
     in_bar = col_smooth > ink_thr
@@ -405,7 +410,7 @@ def _regular_windows(bar_runs, max_dev=0.8):
     starts = np.array([s for s, _ in bar_runs], dtype=np.float64)
     windows = np.lib.stride_tricks.sliding_window_view(np.diff(starts), 64)
     med = np.median(windows, axis=1)
-    with np.errstate(divide='ignore', invalid='ignore'):
+    with np.errstate(divide="ignore", invalid="ignore"):
         dev = np.abs(windows - med[:, None]).max(axis=1) / med
     for i in np.flatnonzero((med >= 1) & (dev <= max_dev)):
         yield int(i), int(i) + 65
@@ -422,14 +427,14 @@ def _estimate_pitch(binary: np.ndarray, bar_runs: list):
     profile = np.zeros_like(col_ink)
     for (s, e), w in zip(bar_runs, widths):
         if w <= max_w:
-            profile[s:e + 1] = col_ink[s:e + 1]
+            profile[s : e + 1] = col_ink[s : e + 1]
     profile -= profile.mean()
     n = len(profile)
     hi = n // 64
     if hi < 9:
         return None
     spec = np.fft.rfft(profile, 2 * n)
-    ac = np.fft.irfft(spec * np.conj(spec))[:hi + 2]
+    ac = np.fft.irfft(spec * np.conj(spec))[: hi + 2]
     lags = np.arange(8, hi + 1)
     local_max = (ac[lags] > ac[lags - 1]) & (ac[lags] >= ac[lags + 1])
     if not local_max.any():
@@ -468,8 +473,10 @@ def _pitch_grid_windows(binary: np.ndarray, bar_runs: list, max_windows: int = 3
 
     ks = np.unique(k[inliers]).astype(int)
     windows = sorted(
-        ((np.count_nonzero((ks >= k0) & (ks < k0 + 65)), k0)
-         for k0 in range(ks.min(), max(ks.min(), ks.max() - 64) + 1)),
+        (
+            (np.count_nonzero((ks >= k0) & (ks < k0 + 65)), k0)
+            for k0 in range(ks.min(), max(ks.min(), ks.max() - 64) + 1)
+        ),
         reverse=True,
     )
     half_w = max(1.0, 0.2 * step)
@@ -519,24 +526,25 @@ def _component_bar_windows(binary: np.ndarray, scale: int, max_lines: int = 3):
         if best_count < 65:
             return
 
-        crosses = ((top[idx] - best_slope * cx[idx] <= best_icpt)
-                   & (bottom[idx] - best_slope * cx[idx] >= best_icpt))
+        crosses = (top[idx] - best_slope * cx[idx] <= best_icpt) & (
+            bottom[idx] - best_slope * cx[idx] >= best_icpt
+        )
         on_line = idx[crosses]
         remaining[on_line] = False
         on_line = on_line[np.argsort(cx[on_line])]
         gaps = np.diff(cx[on_line])
         for seg in np.split(on_line, np.flatnonzero(gaps > 2.5 * np.median(gaps)) + 1):
             for i in range(len(seg) - 64):
-                win = seg[i:i + 65]
+                win = seg[i : i + 65]
                 xs = (cx[win] * scale).astype(np.float64)
-                runs = [[(int(top[j]) * scale, int(bottom[j]) * scale + scale - 1)]
-                        for j in win]
+                runs = [[(int(top[j]) * scale, int(bottom[j]) * scale + scale - 1)] for j in win]
                 yield xs, runs
 
 
 # =============================================================================
 # STAGE 5 — FADT CLASSIFICATION (tilt-tolerant, with confidence)
 # =============================================================================
+
 
 @dataclass
 class BarRead:
@@ -545,6 +553,7 @@ class BarRead:
     Confidence is the distance of a bar's measured extent from the class
     threshold, normalized by the separation between the two classes.
     """
+
     asc: np.ndarray
     desc: np.ndarray
     asc_conf: np.ndarray
@@ -555,12 +564,16 @@ class BarRead:
 
     def flipped(self) -> "BarRead":
         """The same read as seen with the barcode rotated 180°."""
-        return BarRead(self.desc[::-1].copy(), self.asc[::-1].copy(),
-                       self.desc_conf[::-1].copy(), self.asc_conf[::-1].copy())
+        return BarRead(
+            self.desc[::-1].copy(),
+            self.asc[::-1].copy(),
+            self.desc_conf[::-1].copy(),
+            self.asc_conf[::-1].copy(),
+        )
 
 
 def _bits_to_fadt(asc, desc) -> str:
-    return ''.join('TADF'[int(a) | int(d) << 1] for a, d in zip(asc, desc))
+    return "".join("TADF"[int(a) | int(d) << 1] for a, d in zip(asc, desc))
 
 
 def _vertical_runs(binary: np.ndarray, bar_runs: list) -> list:
@@ -604,7 +617,7 @@ def _split_threshold(vals: np.ndarray):
     if len(gaps) == 0 or gaps.max() < 2:
         return float(s.mean()), 1.0
     k = int(np.argmax(gaps))
-    sep = float(np.median(s[k + 1:]) - np.median(s[:k + 1]))
+    sep = float(np.median(s[k + 1 :]) - np.median(s[: k + 1]))
     return (s[k] + s[k + 1]) / 2.0, max(sep, 1.0)
 
 
@@ -649,8 +662,9 @@ def classify_bars_fadt(binary: np.ndarray, bar_runs: list) -> str:
 # STAGE 6 — DECODE, ORIENTATION & ERROR CORRECTION
 # =============================================================================
 
+
 def _codeword_valid(code: int) -> bool:
-    return code in imb.inverted or (code ^ 0x1fff) in imb.inverted
+    return code in imb.inverted or (code ^ 0x1FFF) in imb.inverted
 
 
 def _bad_codewords(fadt: str) -> list:
@@ -659,8 +673,8 @@ def _bad_codewords(fadt: str) -> list:
 
 def _decode_fadt(fadt: str):
     result = imb.decode(fadt)
-    if result is not None and result.get('crc_ok'):
-        result['fadt'] = fadt
+    if result is not None and result.get("crc_ok"):
+        result["fadt"] = fadt
         return result
     return None
 
@@ -710,7 +724,7 @@ def _error_correct(read: BarRead):
                 bits[k % 65] = not bits[k % 65]
             result = _decode_fadt(_bits_to_fadt(asc, desc))
             if result is not None:
-                result['corrected_bars'] = len(combo)
+                result["corrected_bars"] = len(combo)
                 return result
     return None
 
@@ -719,8 +733,10 @@ def _error_correct(read: BarRead):
 # ROBUST DECODE — try a single region with multiple binarization strategies
 # =============================================================================
 
-def try_decode_region(gray: np.ndarray, region: tuple, collect_all: bool = False,
-                      near_misses: list = None):
+
+def try_decode_region(
+    gray: np.ndarray, region: tuple, collect_all: bool = False, near_misses: list = None
+):
     """
     Attempt to decode IMB(s) from a specific region of a grayscale image.
 
@@ -746,22 +762,19 @@ def try_decode_region(gray: np.ndarray, region: tuple, collect_all: bool = False
     binaries = []
 
     # Strategy 1: Otsu (original approach)
-    _, bin_otsu = cv2.threshold(crop, 0, 255,
-                                cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    _, bin_otsu = cv2.threshold(crop, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
     binaries.append(bin_otsu)
 
     # Strategy 2: CLAHE enhanced + Otsu
     clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(4, 4))
     enhanced = clahe.apply(crop)
-    _, bin_clahe = cv2.threshold(enhanced, 0, 255,
-                                 cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    _, bin_clahe = cv2.threshold(enhanced, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
     binaries.append(bin_clahe)
 
     # Strategy 3: Adaptive Gaussian threshold
     block_size = max(11, (min(crop.shape) // 4) | 1)  # ensure odd
     bin_adapt = cv2.adaptiveThreshold(
-        crop, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-        cv2.THRESH_BINARY_INV, block_size, 5
+        crop, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, block_size, 5
     )
     binaries.append(bin_adapt)
 
@@ -776,40 +789,39 @@ def try_decode_region(gray: np.ndarray, region: tuple, collect_all: bool = False
 
     # Strategy 5: Inverted image + Otsu (for dark backgrounds)
     crop_inv = 255 - crop
-    _, bin_inv = cv2.threshold(crop_inv, 0, 255,
-                               cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    _, bin_inv = cv2.threshold(crop_inv, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
     binaries.append(bin_inv)
 
     all_results = []
     seen_tracking = set()
     for binary in binaries:
         for r in _decode_binary(binary, near_misses, first_only=not collect_all):
-            if r['tracking'] not in seen_tracking:
-                seen_tracking.add(r['tracking'])
+            if r["tracking"] not in seen_tracking:
+                seen_tracking.add(r["tracking"])
                 all_results.append(r)
         if all_results and not collect_all:
             return all_results[0]
     return all_results if collect_all else None
 
 
-def _decode_binary(binary: np.ndarray, near_misses: list = None,
-                   first_only: bool = False, fallbacks: bool = True) -> list:
+def _decode_binary(
+    binary: np.ndarray, near_misses: list = None, first_only: bool = False, fallbacks: bool = True
+) -> list:
     """
     Decode all valid IMBs from a binary crop. Returns list of results.
     `fallbacks` enables the slower component and pitch-grid segmenters.
     """
     scale = 4
     ch, cw = binary.shape
-    up = cv2.resize(binary, (cw * scale, ch * scale),
-                    interpolation=cv2.INTER_NEAREST)
+    up = cv2.resize(binary, (cw * scale, ch * scale), interpolation=cv2.INTER_NEAREST)
 
     bar_runs = find_bar_runs(up)
     results = []
     seen_tracking = set()
 
     def _add(result):
-        if result is not None and result['tracking'] not in seen_tracking:
-            seen_tracking.add(result['tracking'])
+        if result is not None and result["tracking"] not in seen_tracking:
+            seen_tracking.add(result["tracking"])
             results.append(result)
 
     # Many bars (barcode + text, or several barcodes): slide a 65-bar window
@@ -847,6 +859,7 @@ def _decode_binary(binary: np.ndarray, near_misses: list = None,
 # ROBUST SCAN — multi-strategy IMB detection
 # =============================================================================
 
+
 def scan_image_robust(gray: np.ndarray, diagnostics: dict = None) -> dict:
     """
     Robust IMB scanning that tries multiple detection strategies.
@@ -877,14 +890,13 @@ def scan_image_robust_all(gray: np.ndarray, diagnostics: dict = None) -> list:
     if not results and max(gray.shape) < SMALL_IMAGE_SIDE:
         for factor in SMALL_IMAGE_UPSCALES:
             logger.debug("upscale retry | factor=%d", factor)
-            up = cv2.resize(gray, None, fx=factor, fy=factor,
-                            interpolation=cv2.INTER_LANCZOS4)
+            up = cv2.resize(gray, None, fx=factor, fy=factor, interpolation=cv2.INTER_LANCZOS4)
             results = _scan_orientations(up, near_misses)
             if results:
                 break
 
     if not results and diagnostics is not None and near_misses:
-        diagnostics['near_miss_fadt'] = min(near_misses, key=lambda m: m[0])[1].fadt()
+        diagnostics["near_miss_fadt"] = min(near_misses, key=lambda m: m[0])[1].fadt()
     return results
 
 
@@ -899,8 +911,9 @@ def _scan_orientations(gray: np.ndarray, near_misses: list) -> list:
                 return results
         result = _correct_near_misses(near_misses)
         if result is not None:
-            logger.info("decoded with error correction | corrected_bars=%d",
-                        result['corrected_bars'])
+            logger.info(
+                "decoded with error correction | corrected_bars=%d", result["corrected_bars"]
+            )
             return [result]
     return []
 
@@ -933,7 +946,7 @@ def _scan_view(gray: np.ndarray, near_misses: list, strip_scan: bool = True) -> 
             return
         items = results_or_result if isinstance(results_or_result, list) else [results_or_result]
         for r in items:
-            key = r['tracking']
+            key = r["tracking"]
             if key not in seen_tracking:
                 seen_tracking.add(key)
                 all_results.append(r)
@@ -949,23 +962,20 @@ def _scan_view(gray: np.ndarray, near_misses: list, strip_scan: bool = True) -> 
         enhanced = clahe.apply(gray)
         candidates = detect_barcode_candidates(enhanced)
         for region in candidates:
-            _collect(try_decode_region(enhanced, region, collect_all=True,
-                                       near_misses=near_misses))
+            _collect(try_decode_region(enhanced, region, collect_all=True, near_misses=near_misses))
 
     # Strategy 3: Morphological detection (moderate speed)
     if not all_results:
         morph_candidates = detect_barcode_candidates_morphological(gray)
         for region in morph_candidates:
-            _collect(try_decode_region(gray, region, collect_all=True,
-                                       near_misses=near_misses))
+            _collect(try_decode_region(gray, region, collect_all=True, near_misses=near_misses))
 
     # Strategy 4: Inverted image (for dark backgrounds)
     if not all_results and gray.mean() < 160:
         inverted = 255 - gray
         candidates = detect_barcode_candidates(inverted)
         for region in candidates:
-            _collect(try_decode_region(inverted, region, collect_all=True,
-                                       near_misses=near_misses))
+            _collect(try_decode_region(inverted, region, collect_all=True, near_misses=near_misses))
 
     # Strategy 5: Horizontal strip scan (slow, last resort)
     if not all_results and strip_scan:
@@ -988,7 +998,7 @@ def _strip_scan(gray: np.ndarray, near_misses: list = None) -> dict:
 
     for strip_h in strip_heights:
         for y in range(0, H - strip_h, step):
-            strip = gray[y:y + strip_h, :]
+            strip = gray[y : y + strip_h, :]
             # Quick check: does this strip have enough vertical edge energy?
             edge = np.abs(cv2.Sobel(strip, cv2.CV_32F, 1, 0, ksize=3))
             col_energy = edge.sum(axis=0)
@@ -1007,12 +1017,10 @@ def _strip_scan(gray: np.ndarray, near_misses: list = None) -> dict:
 
 def _try_strip_decode(strip_gray: np.ndarray, near_misses: list = None) -> dict:
     """Try to decode an IMB from a narrow strip of the image."""
-    _, bin_otsu = cv2.threshold(strip_gray, 0, 255,
-                                cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    _, bin_otsu = cv2.threshold(strip_gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
     block_size = max(11, (min(strip_gray.shape) // 3) | 1)
     bin_adapt = cv2.adaptiveThreshold(
-        strip_gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-        cv2.THRESH_BINARY_INV, block_size, 5
+        strip_gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, block_size, 5
     )
     for binary in (bin_otsu, bin_adapt):
         results = _decode_binary(binary, near_misses, first_only=True, fallbacks=False)
@@ -1024,6 +1032,7 @@ def _try_strip_decode(strip_gray: np.ndarray, near_misses: list = None) -> dict:
 # =============================================================================
 # FULL PIPELINE
 # =============================================================================
+
 
 def process_image(image_path: str, debug: bool = False) -> dict:
     """
@@ -1042,8 +1051,12 @@ def process_image(image_path: str, debug: bool = False) -> dict:
     # Try robust scan first
     result = scan_image_robust(gray)
     if result is not None:
-        logger.info("decode success | fadt_len=%d crc_ok=%s tracking=%s",
-                    len(result['fadt']), result['crc_ok'], result.get('tracking'))
+        logger.info(
+            "decode success | fadt_len=%d crc_ok=%s tracking=%s",
+            len(result["fadt"]),
+            result["crc_ok"],
+            result.get("tracking"),
+        )
         return result
 
     logger.warning("no IMB decoded | input=%s", image_path)
@@ -1051,8 +1064,8 @@ def process_image(image_path: str, debug: bool = False) -> dict:
 
 
 def print_result(r: dict) -> None:
-    tracking = r['tracking']
-    routing = r.get('routing', '')
+    tracking = r["tracking"]
+    routing = r.get("routing", "")
 
     print()
     print("=" * 50)
@@ -1067,7 +1080,7 @@ def print_result(r: dict) -> None:
     print(f"  Mailer ID     : {r['mailer_id']}")
     print(f"  Serial        : {r['serial']}")
     print(f"  CRC OK        : {r['crc_ok']}")
-    if r.get('corrected_bars'):
+    if r.get("corrected_bars"):
         print(f"  Corrected bars: {r['corrected_bars']}")
     print("=" * 50)
 
@@ -1078,8 +1091,9 @@ def print_result(r: dict) -> None:
 
 if __name__ == "__main__":
     from dotenv import load_dotenv
-    from logging_config import setup_logging
+
     from failed_scan_store import record_failure
+    from logging_config import setup_logging
 
     load_dotenv()
 
@@ -1099,8 +1113,9 @@ if __name__ == "__main__":
         logger.exception("pipeline failed | input=%s", image_path)
         try:
             gray = load_gray(image_path)
-            record_failure(gray, source=image_path, reason="no_decode_cli",
-                           attempts=["scan_image_robust"])
+            record_failure(
+                gray, source=image_path, reason="no_decode_cli", attempts=["scan_image_robust"]
+            )
         except Exception:
             pass
         print(f"\n[ERROR] {e}", file=sys.stderr)

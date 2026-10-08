@@ -22,6 +22,7 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "pytest-xdist>=3.5",
+    "ruff>=0.16.10",
 ]
 
 [build-system]
@@ -37,6 +38,18 @@ only-include = [
     "stid_table.py",
     "logging_config.py",
 ]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+"stid_table.py" = ["E501"]
+
+[tool.ruff.format]
+exclude = ["stid_table.py"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -9,6 +9,7 @@ Each record counts distinct mail pieces (by hashed tracking code), so
 Streamlit reruns or re-scanning the same piece don't inflate the count.
 Routing codes and serials are not stored.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -50,8 +51,12 @@ def _load_r2(mid: str) -> dict | None:
 def _save_r2(record: dict) -> str:
     client, bucket = _r2_client()
     key = f"{R2_PREFIX}{record['mid']}.json"
-    client.put_object(Bucket=bucket, Key=key, Body=json.dumps(record, indent=2).encode("utf-8"),
-                      ContentType="application/json")
+    client.put_object(
+        Bucket=bucket,
+        Key=key,
+        Body=json.dumps(record, indent=2).encode("utf-8"),
+        ContentType="application/json",
+    )
     return f"r2://{bucket}/{key}"
 
 
@@ -67,22 +72,34 @@ def record_unknown_mid(result: dict, *, source: str | None = None) -> str | None
         load, save = (_load_local, _save_local) if backend == "local" else (_load_r2, _save_r2)
         now = datetime.now().isoformat(timespec="seconds")
 
-        record = load(mid) or {"mid": mid, "first_seen": now, "pieces": [],
-                               "service_types": [], "barcode_ids": [], "sources": []}
+        record = load(mid) or {
+            "mid": mid,
+            "first_seen": now,
+            "pieces": [],
+            "service_types": [],
+            "barcode_ids": [],
+            "sources": [],
+        }
         if piece in record["pieces"]:
             return None
         record["pieces"].append(piece)
         record["last_seen"] = now
-        for field, value in (("service_types", result.get("service_type")),
-                             ("barcode_ids", result.get("barcode_id"))):
+        for field, value in (
+            ("service_types", result.get("service_type")),
+            ("barcode_ids", result.get("barcode_id")),
+        ):
             if value and value not in record[field]:
                 record[field] = sorted(record[field] + [value])
         if source:
             record["sources"] = (record["sources"] + [source])[-MAX_SOURCES:]
 
         location = save(record)
-        logger.info("unknown MID logged | mid=%s pieces=%d location=%s",
-                    mid, len(record["pieces"]), location)
+        logger.info(
+            "unknown MID logged | mid=%s pieces=%d location=%s",
+            mid,
+            len(record["pieces"]),
+            location,
+        )
         return location
     except Exception:
         logger.exception("unknown_mid_log: record failed (non-fatal)")
@@ -97,7 +114,9 @@ def list_unknown_mids() -> list[dict]:
         records = [json.loads(p.read_text()) for p in sorted(LOCAL_DIR.glob("*.json"))]
     elif backend == "r2":
         client, bucket = _r2_client()
-        for page in client.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix=R2_PREFIX):
+        for page in client.get_paginator("list_objects_v2").paginate(
+            Bucket=bucket, Prefix=R2_PREFIX
+        ):
             for obj in page.get("Contents", []):
                 body = client.get_object(Bucket=bucket, Key=obj["Key"])["Body"].read()
                 records.append(json.loads(body))

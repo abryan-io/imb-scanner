@@ -4,6 +4,7 @@ Call setup_logging() once at entrypoint. Writes to both stdout and a
 timestamped file in logs/ tagged with the run UUID so pytest artifacts
 and the parent run share an ID.
 """
+
 from __future__ import annotations
 
 import logging
