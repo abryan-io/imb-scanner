@@ -121,3 +121,24 @@ def test_noise_estimate_separates_clean_from_noisy():
     noisy = np.clip(clean + np.random.default_rng(0).normal(0, 12, clean.shape), 0, 255)
     assert cli_app.estimate_noise_sigma(clean) < cli_app.NOISE_SIGMA_DENOISE
     assert cli_app.estimate_noise_sigma(noisy.astype(np.uint8)) > cli_app.NOISE_SIGMA_DENOISE
+
+
+def _distant_webcam_frame() -> np.ndarray:
+    """Low-contrast barcode at ~2.7px bar pitch, blurred and JPEG-compressed,
+    in a 704x396 frame like Streamlit's camera input."""
+    small = cv2.resize(_render(FADT), None, fx=0.18, fy=0.18,
+                       interpolation=cv2.INTER_AREA).astype(np.float32)
+    frame = np.full((396, 704), 235, np.float32)
+    frame[150:150 + small.shape[0], 200:200 + small.shape[1]] = 235 - (235 - small) * 0.5
+    frame = cv2.GaussianBlur(frame, (0, 0), 0.6)
+    ok, buf = cv2.imencode(".jpg", frame.astype(np.uint8), [cv2.IMWRITE_JPEG_QUALITY, 80])
+    return cv2.imdecode(buf, cv2.IMREAD_GRAYSCALE)
+
+
+def test_decodes_distant_barcode_in_small_frame():
+    assert TRACKING in _trackings(_distant_webcam_frame())
+
+
+def test_distant_barcode_needs_upscale_retry(monkeypatch):
+    monkeypatch.setattr(cli_app, "SMALL_IMAGE_UPSCALES", ())
+    assert _trackings(_distant_webcam_frame()) == []

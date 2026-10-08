@@ -7,7 +7,6 @@ Run: streamlit run app.py
 """
 
 import logging
-import os
 import streamlit as st
 import cv2
 import numpy as np
@@ -15,13 +14,14 @@ from dotenv import load_dotenv
 from PIL import Image, ImageOps
 from pillow_heif import register_heif_opener
 import fitz  # PyMuPDF
-import openpyxl
 import intelligent_mail_barcode as imb
+import mid_lookup
 from stid_table import lookup as stid_lookup, describe as stid_describe
 from cli_app import (detect_barcode_region, find_bar_runs, filter_to_65_bars,
                      classify_bars_fadt, scan_image_robust)
 from logging_config import setup_logging
 from failed_scan_store import record_failure
+from unknown_mid_log import record_unknown_mid
 
 load_dotenv()
 setup_logging()
@@ -30,27 +30,9 @@ logger = logging.getLogger(__name__)
 
 # ─── MID Lookup Table ────────────────────────────────────────────────────────────
 
-MID_LKP_PATH = os.path.join(os.path.dirname(__file__), "MID_Lkp.xlsx")
-
 @st.cache_data
 def load_mid_table():
-    """Load MID lookup table from Excel. Returns dict keyed by MID string."""
-    if not os.path.exists(MID_LKP_PATH):
-        return {}
-    wb = openpyxl.load_workbook(MID_LKP_PATH, read_only=True)
-    ws = wb.active
-    rows = list(ws.iter_rows(min_row=2, values_only=True))
-    wb.close()
-    table = {}
-    for row in rows:
-        if len(row) >= 4 and row[0] is not None:
-            mid_key = str(int(row[0])) if isinstance(row[0], (int, float)) else str(row[0]).strip()
-            table[mid_key] = {
-                'BID': str(int(row[1])) if isinstance(row[1], (int, float)) else str(row[1] or ''),
-                'Company': str(row[2] or ''),
-                'Address': str(row[3] or ''),
-            }
-    return table
+    return mid_lookup.load_mid_table()
 
 mid_table = load_mid_table()
 
@@ -131,7 +113,7 @@ def scan_image(pil_img: Image.Image):
 
 # ─── Result Display (shared by image & PDF paths) ───────────────────────────────
 
-def display_decode_result(result):
+def display_decode_result(result, source_label: str = "unknown"):
     """Display a successfully decoded IMB result with MID lookup."""
     tracking = result['tracking']
     routing = result.get('routing', '')
@@ -166,7 +148,8 @@ def display_decode_result(result):
         m2.metric("BID", mid_info['BID'])
         st.write(f"**Address:** {mid_info['Address']}")
     else:
-        st.caption("MID not found in lookup table")
+        st.caption("MID not found in lookup table — logged for manual lookup")
+        record_unknown_mid(result, source=source_label)
 
     # STID lookup
     stid_info = stid_lookup(result['service_type'])
@@ -281,7 +264,7 @@ def display_image_scan(pil_img, source_label: str = "unknown"):
     st.divider()
 
     if result:
-        display_decode_result(result)
+        display_decode_result(result, source_label)
     else:
         display_scan_failure(fadt, debug_info)
         location = record_failure(
@@ -362,7 +345,7 @@ if uploaded_pdf:
                 with thumb_col:
                     st.image(page_img, caption=f"Page {page_num}", use_container_width=True)
                 with result_col:
-                    display_decode_result(result)
+                    display_decode_result(result, f"{uploaded_pdf.name} p{page_num}")
 
                     fadt = result.get('fadt', '')
                     if fadt:

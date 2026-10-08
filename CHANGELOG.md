@@ -5,6 +5,8 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Unknown-MID log: decoded Mailer IDs not in `MID_Lkp.xlsx` are recorded (local or R2, per `FAILED_SCAN_BACKEND`) as one record per MID with distinct-piece count, first/last seen, service types, and recent sources. `tools/unknown_mids.py` lists the ones still missing as paste-ready TSV. Tests in `tests/test_unknown_mid_log.py`.
+- Small images (long side < 1600px) that don't decode are retried upscaled 2× then 3× (Lanczos). Fixes distant barcodes in Streamlit camera frames (704×396, ~3px bar pitch): 0 → 8 of 11 captured failures decode, each matching the ZIP+4 printed on the piece. Synthetic regression tests in `tests/test_scanner_units.py`.
 - Scanner robustness overhaul in `cli_app.py`. Decode rate on the 17-page corpus under synthetic distortions, before → after: 1° rotation 2 → 17, 4° rotation 0 → 17, 90°/180° rotation 0 → 17, 2× scale 6 → 17, noise σ=20 6 → 17, JPEG q30 13 → 17, perspective 5% 4 → 17, uneven shading 11 → 16. Changes:
   - Scale normalization (long side capped at 3300px) and gated Gaussian denoise (Immerkær noise estimate on flat pixels).
   - Deskew from the dominant near-vertical edge angle; 90° retry; 180° handled by decoding each read in both directions.
@@ -28,7 +30,11 @@ All notable changes to this project will be documented in this file.
 - `failed_scan_store.py` with pluggable local / Cloudflare R2 backends for capturing images the scanner can't decode.
 - CHANGELOG.md + expanded README covering uv, tests, failed-scan capture, and project layout.
 
+### Fixed
+- MID lookup missed every 6-digit MID with leading zeros (27 of 156 rows, e.g. `000128`), because Excel stores them as numbers. `mid_lookup.normalize_mid()` pads short numeric MIDs back to 6 digits.
+
 ### Changed
+- MID table loading moved from `app.py` to `mid_lookup.py`; R2 client construction factored into `failed_scan_store._r2_client()`.
 - Streamlit uploads and camera captures honor EXIF orientation.
 - Morphological detector's vertical opening kernel is now `H // 400` (was `H // 100`, which erased all but full-height bars at 300 DPI).
 - Unified the duplicated sliding-window decode paths into `_decode_binary()`.

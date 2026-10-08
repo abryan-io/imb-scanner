@@ -97,7 +97,8 @@ def _write_local(png_bytes: bytes, meta: dict, img_name: str, meta_name: str) ->
     return str(img_path)
 
 
-def _write_r2(png_bytes: bytes, meta: dict, img_name: str, meta_name: str) -> str:
+def _r2_client():
+    """Return (boto3 S3 client, bucket name) for the configured R2 bucket."""
     try:
         import boto3
     except ImportError as e:
@@ -115,7 +116,11 @@ def _write_r2(png_bytes: bytes, meta: dict, img_name: str, meta_name: str) -> st
         aws_secret_access_key=os.environ["R2_SECRET_ACCESS_KEY"],
         region_name="auto",
     )
-    bucket = os.environ["R2_BUCKET_NAME"]
+    return client, os.environ["R2_BUCKET_NAME"]
+
+
+def _write_r2(png_bytes: bytes, meta: dict, img_name: str, meta_name: str) -> str:
+    client, bucket = _r2_client()
     client.put_object(Bucket=bucket, Key=img_name, Body=png_bytes, ContentType="image/png")
     client.put_object(
         Bucket=bucket,

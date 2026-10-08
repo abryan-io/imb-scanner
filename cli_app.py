@@ -33,6 +33,10 @@ logger = logging.getLogger(__name__)
 # Larger inputs (e.g. 12MP phone photos) are downscaled so the pixel constants
 # below, tuned for ~300 DPI renders, stay meaningful.
 WORKING_MAX_SIDE = 3300
+# Small inputs (e.g. 704x396 webcam frames of a distant barcode, ~3px bar
+# pitch) are retried upscaled when the native-size scan finds nothing.
+SMALL_IMAGE_SIDE = 1600
+SMALL_IMAGE_UPSCALES = (2, 3)
 SKEW_MIN_DEG = 0.3
 NOISE_SIGMA_DENOISE = 5.0
 
@@ -857,7 +861,8 @@ def scan_image_robust_all(gray: np.ndarray, diagnostics: dict = None) -> list:
     Robust IMB scanning that returns ALL valid IMB decodes found.
 
     The image is scaled to a working size, then scanned upright (deskewed and
-    as-is) and, failing that, rotated 90°. 180° is handled by decoding each
+    as-is) and, failing that, rotated 90°. Small images that yield nothing
+    are retried upscaled. 180° is handled by decoding each
     read in both directions. If no clean decode is found in an orientation,
     the best near-miss reads are error-corrected before moving on.
 
@@ -868,6 +873,23 @@ def scan_image_robust_all(gray: np.ndarray, diagnostics: dict = None) -> list:
     gray = denoise_if_noisy(normalize_scale(gray))
     near_misses = []
 
+    results = _scan_orientations(gray, near_misses)
+    if not results and max(gray.shape) < SMALL_IMAGE_SIDE:
+        for factor in SMALL_IMAGE_UPSCALES:
+            logger.debug("upscale retry | factor=%d", factor)
+            up = cv2.resize(gray, None, fx=factor, fy=factor,
+                            interpolation=cv2.INTER_LANCZOS4)
+            results = _scan_orientations(up, near_misses)
+            if results:
+                break
+
+    if not results and diagnostics is not None and near_misses:
+        diagnostics['near_miss_fadt'] = min(near_misses, key=lambda m: m[0])[1].fadt()
+    return results
+
+
+def _scan_orientations(gray: np.ndarray, near_misses: list) -> list:
+    """Scan upright (deskewed and as-is), then rotated 90°."""
     # The brute-force strip scan only runs upright; it is the slowest strategy
     # and the 90° pass exists for sideways photos, not hard-to-locate codes.
     for base, strip_scan in ((gray, True), (cv2.rotate(gray, cv2.ROTATE_90_CLOCKWISE), False)):
@@ -880,9 +902,6 @@ def scan_image_robust_all(gray: np.ndarray, diagnostics: dict = None) -> list:
             logger.info("decoded with error correction | corrected_bars=%d",
                         result['corrected_bars'])
             return [result]
-
-    if diagnostics is not None and near_misses:
-        diagnostics['near_miss_fadt'] = min(near_misses, key=lambda m: m[0])[1].fadt()
     return []
 
 

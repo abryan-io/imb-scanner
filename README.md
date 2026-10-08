@@ -4,7 +4,7 @@ Streamlit app that detects and decodes USPS Intelligent Mail Barcodes (IMB) from
 
 ## How it works
 
-1. **Normalize** — images larger than 3300px on the long side are downscaled; noisy images (estimated σ > 5) get a 5×5 Gaussian blur
+1. **Normalize** — images larger than 3300px on the long side are downscaled; noisy images (estimated σ > 5) get a 5×5 Gaussian blur. Small images (< 1600px) that don't decode are retried upscaled 2× and 3×
 2. **Orient** — the dominant near-vertical edge angle is measured and the image deskewed; if nothing decodes upright, the image is retried rotated 90°. Upside-down barcodes are handled by decoding every read in both directions
 3. **Locate** — Sobel-X row energy (multi-candidate, plus CLAHE / morphological / inverted / strip-scan fallbacks) finds the barcode band
 4. **Binarize** — five variants per region: Otsu, CLAHE+Otsu, adaptive Gaussian, background-flattened Otsu (uneven lighting), inverted Otsu
@@ -79,6 +79,19 @@ When the scanner can't decode an image, it writes the image + metadata to `FAILE
    The tool prompts for `barcode_id / stid / mid / serial / routing / notes` per image, validates lengths per the IMb spec, and writes a `labeled` block back into the sidecar JSON so the original capture metadata is preserved. Press Enter on the first field to skip an image; Ctrl-C to stop and resume later.
 3. **Promote to regression corpus** once labeled: move the `failed_*.png` + `failed_*.json` pair into `tests/fixtures/regression_corpus/`. A future regression test can iterate that directory and assert the scanner reproduces the labeled decode.
 
+## Unknown Mailer IDs
+
+When a barcode decodes but its MID isn't in `MID_Lkp.xlsx`, the app logs it using the same backend as failed scans (`FAILED_SCAN_BACKEND`): one record per MID at `data/unknown_mids/{mid}.json` (local) or `unknown_mids/{mid}.json` (R2). Each record counts distinct mail pieces and keeps first/last seen, service types, and the last 10 sources. Routing codes and serials are not stored.
+
+List the MIDs still missing from the lookup (tab-separated, pastes into Excel):
+
+```bash
+uv run python tools/unknown_mids.py --backend r2   # what the Streamlit app logged
+uv run python tools/unknown_mids.py --all          # include MIDs since added to the lookup
+```
+
+After adding a MID to `MID_Lkp.xlsx` it drops off the list. Leading zeros don't need to be preserved in Excel — short numeric MIDs are padded back to 6 digits on load.
+
 ## Layout
 
 ```
@@ -87,13 +100,16 @@ USPS_IMB_Scanner/
 ├── cli_app.py                  Core detection pipeline + CLI entrypoint
 ├── intelligent_mail_barcode.py FADT decoder (pyimb port, CRC-11)
 ├── stid_table.py               Service Type ID lookup
+├── mid_lookup.py               MID_Lkp.xlsx loader (restores leading zeros)
+├── unknown_mid_log.py          Log of decoded MIDs missing from the lookup
 ├── logging_config.py           setup_logging() — run_id, dual sink
 ├── failed_scan_store.py        Pluggable local/R2 capture of failed scans
 ├── MID_Lkp.xlsx                Mailer ID → company lookup
 ├── pyproject.toml / uv.lock    Dependency management
 ├── conftest.py                 Pytest session setup + reporters
 ├── tools/
-│   └── label_corpus.py         Interactive labeler for captured failures
+│   ├── label_corpus.py         Interactive labeler for captured failures
+│   └── unknown_mids.py         List MIDs still missing from MID_Lkp.xlsx
 ├── tests/                      pytest test suite + fixtures
 ├── logs/                       Run logs (gitignored, .gitkeep tracked)
 ├── test-results/               JUnit XML + markdown summary + history.jsonl
