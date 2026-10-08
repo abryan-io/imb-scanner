@@ -49,3 +49,8 @@ desktop.ini
 Thumbs.db
 *.swp
 *.swo
+
+# project-template
+data/
+.promptfoo/
+review/
