@@ -1,0 +1,2 @@
+# False positive from the 2026-10-07 leak sweep: pydeck source map in a venv committed in 1d52746f, removed later.
+1d52746f6a5b96bb01c3d74bf941976c8dc14e83:venv/share/jupyter/nbextensions/pydeck/index.js.map:generic-api-key:6
