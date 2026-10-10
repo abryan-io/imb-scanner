@@ -1,4 +1,5 @@
 setup:
+    git rev-parse --git-dir >/dev/null 2>&1 || git init -b main
     uv sync
     pre-commit install
 

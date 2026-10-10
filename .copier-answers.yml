@@ -1,5 +1,5 @@
 # Changes here will be overwritten by Copier; NEVER EDIT MANUALLY
-_commit: v0.1.0
+_commit: v0.1.1
 _src_path: gh:abryan-io/project-template
 cloud: none
 package_name: usps_imb_scanner
