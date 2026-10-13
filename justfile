@@ -15,7 +15,7 @@ lint:
     uv run ruff format .
 
 run:
-    uv run streamlit run app.py
+    just bws-run uv run streamlit run app.py
 
 [positional-arguments]
 bws-run *cmd:
