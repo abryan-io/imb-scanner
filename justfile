@@ -26,7 +26,16 @@ bws-run *cmd:
     token="$(< "$token_file")"
     id="$(BWS_ACCESS_TOKEN="$token" bws project list --output json | jq -er --arg n 'dev' \
       '[.[] | select(.name == $n)] | if length == 1 then .[0].id else error("want one SM project named \($n), found \(length)") end')"
-    BWS_ACCESS_TOKEN="$token" exec bws run --shell bash --project-id "$id" -- "$(printf '%q ' "$@")"
+    secrets="$(BWS_ACCESS_TOKEN="$token" bws secret list "$id" --output json)"
+    n=0
+    while IFS= read -r -d '' name && IFS= read -r -d '' value; do
+      export "$name=$value"
+      n=$((n + 1))
+    done < <(printf '%s' "$secrets" | jq -j --arg s '__USPS_IMB_SCANNER' \
+      '.[] | select(.key | endswith($s)) | (.key | rtrimstr($s)), "\u0000", .value, "\u0000"')
+    (( n )) || echo "bws-run: no secrets named NAME__USPS_IMB_SCANNER in dev" >&2
+    unset BWS_ACCESS_TOKEN
+    exec "$@"
 
 update-template:
-    uvx copier update --conflict inline
+    uvx copier@9.18.2 update --conflict inline

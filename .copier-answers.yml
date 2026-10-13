@@ -1,9 +1,10 @@
 # Changes here will be overwritten by Copier; NEVER EDIT MANUALLY
-_commit: v0.1.2
+_commit: v0.1.4
 _src_path: gh:abryan-io/project-template
 bws_project: dev
 cloud: none
 package_name: usps_imb_scanner
 project_name: usps-imb-scanner
 python_version: '3.10'
+secret_suffix: USPS_IMB_SCANNER
 uses_llm: false
