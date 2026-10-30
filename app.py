@@ -46,18 +46,36 @@ mid_table = load_mid_table()
 # ─── PDF Conversion ─────────────────────────────────────────────────────────────
 
 
-def pdf_to_pil_images(pdf_bytes, dpi=300):
-    """Convert PDF bytes to list of (page_num, PIL Image) tuples."""
+# A page rendered at 300 DPI is ~25 MB, so long PDFs are cut off rather than
+# allowed to exhaust the server's memory.
+MAX_PDF_PAGES = 20
+MAX_FAILED_PAGE_CAPTURES = 5
+
+
+def open_pdf(pdf_bytes):
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-    images = []
+    if doc.needs_pass:
+        doc.close()
+        raise ValueError("PDF is password-protected")
+    return doc
+
+
+def pdf_page_images(doc, dpi=300):
+    """Yield (page_num, PIL Image) for the first MAX_PDF_PAGES pages, rendering one at a time."""
     zoom = dpi / 72.0
     mat = fitz.Matrix(zoom, zoom)
-    for page_num in range(len(doc)):
+    for page_num in range(min(len(doc), MAX_PDF_PAGES)):
         pix = doc[page_num].get_pixmap(matrix=mat)
-        img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-        images.append((page_num + 1, img))  # 1-indexed
-    doc.close()
-    return images
+        yield page_num + 1, Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+
+
+def open_image(fp):
+    """The uploaded image with EXIF orientation applied, or None after showing an error."""
+    try:
+        return ImageOps.exif_transpose(Image.open(fp))
+    except Exception as e:
+        st.error(f"Failed to open image: {e}")
+        return None
 
 
 # ─── Page config ────────────────────────────────────────────────────────────────
@@ -241,19 +259,19 @@ def display_image_scan(pil_img, source_label: str = "unknown"):
 
     with col1:
         st.subheader("Original")
-        st.image(pil_img, use_container_width=True)
+        st.image(pil_img, width="stretch")
 
     with st.spinner("Scanning for IMB..."):
         result, annotated, crop, fadt, method, debug_info = scan_image(pil_img)
 
     with col2:
         st.subheader("Detection")
-        st.image(annotated, use_container_width=True, caption=f"Method: {method}")
+        st.image(annotated, width="stretch", caption=f"Method: {method}")
 
     if crop is not None:
         st.subheader("Detected IMB Region")
         crop_large = cv2.resize(crop, None, fx=4, fy=4, interpolation=cv2.INTER_CUBIC)
-        st.image(crop_large, use_container_width=True)
+        st.image(crop_large, width="stretch")
 
     if fadt is not None:
         st.subheader("Extracted FADT String (65 bars)")
@@ -270,7 +288,7 @@ def display_image_scan(pil_img, source_label: str = "unknown"):
         sobelx = cv2.Sobel(gray_dbg, cv2.CV_32F, 1, 0, ksize=3)
         edge_vis = np.abs(sobelx)
         edge_vis = (edge_vis / edge_vis.max() * 255).astype(np.uint8)
-        st.image(edge_vis, caption="Sobel-X edge map", use_container_width=True)
+        st.image(edge_vis, caption="Sobel-X edge map", width="stretch")
         row_e = edge_vis.astype(float).sum(axis=1)
         row_e /= row_e.max()
         st.line_chart(row_e, height=150)
@@ -319,9 +337,9 @@ if uploaded_file:
     if uploaded_file.type == "application/pdf":
         uploaded_pdf = uploaded_file
     else:
-        pil_img = ImageOps.exif_transpose(Image.open(uploaded_file))
+        pil_img = open_image(uploaded_file)
 elif camera_img:
-    pil_img = ImageOps.exif_transpose(Image.open(camera_img))
+    pil_img = open_image(camera_img)
 
 if pil_img:
     source_label = uploaded_file.name if uploaded_file else "camera"
@@ -330,28 +348,28 @@ if pil_img:
 # ─── Process PDF Upload ─────────────────────────────────────────────────────────
 
 if uploaded_pdf:
-    pdf_bytes = uploaded_pdf.read()
+    try:
+        doc = open_pdf(uploaded_pdf.read())
+    except Exception as e:
+        st.error(f"Failed to open PDF: {e}")
+        doc = None
 
-    with st.spinner("Converting PDF pages to images..."):
-        try:
-            page_images = pdf_to_pil_images(pdf_bytes)
-        except Exception as e:
-            st.error(f"Failed to open PDF: {e}")
-            page_images = []
-
-    if page_images:
-        total_pages = len(page_images)
+    if doc is not None:
+        total_pages = len(doc)
+        scan_pages = min(total_pages, MAX_PDF_PAGES)
         st.write(
             f"**{total_pages} page{'s' if total_pages != 1 else ''}** detected. "
             "Scanning for IMB barcodes..."
         )
+        if total_pages > MAX_PDF_PAGES:
+            st.warning(f"Only the first {MAX_PDF_PAGES} of {total_pages} pages are scanned.")
 
         found_any = False
         failed_pages: list[tuple[int, Image.Image]] = []
         progress = st.progress(0)
 
-        for idx, (page_num, page_img) in enumerate(page_images):
-            progress.progress((idx + 1) / total_pages)
+        for idx, (page_num, page_img) in enumerate(pdf_page_images(doc)):
+            progress.progress((idx + 1) / scan_pages)
 
             img_rgb = np.array(page_img.convert("RGB"))
             gray = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2GRAY)
@@ -363,7 +381,7 @@ if uploaded_pdf:
 
                 thumb_col, result_col = st.columns([1, 2])
                 with thumb_col:
-                    st.image(page_img, caption=f"Page {page_num}", use_container_width=True)
+                    st.image(page_img, caption=f"Page {page_num}", width="stretch")
                 with result_col:
                     display_decode_result(result, f"{uploaded_pdf.name} p{page_num}")
 
@@ -373,16 +391,17 @@ if uploaded_pdf:
                             st.code(fadt, language=None)
 
                 st.divider()
-            else:
+            elif len(failed_pages) < MAX_FAILED_PAGE_CAPTURES:
                 failed_pages.append((page_num, page_img))
 
+        doc.close()
         progress.empty()
 
         if not found_any:
             st.warning("No IMB barcode found on any page of this PDF.")
             captured = 0
             pdf_source = uploaded_pdf.name if uploaded_pdf else "pdf"
-            for page_num, img in failed_pages[:5]:
+            for page_num, img in failed_pages:
                 location = record_failure(
                     img,
                     source=pdf_source,
@@ -411,8 +430,8 @@ with st.sidebar:
 
     **Mailer ID / MID** (6 or 9 digits)
     Unique identifier assigned by USPS.
-    - 6-digit MID: first digit is 9
-    - 9-digit MID: first digit is 0-8
+    - 6-digit MID: first digit is 0-8
+    - 9-digit MID: first digit is 9
 
     **Serial Number** (6 or 9 digits)
     Mailer-assigned piece identifier.

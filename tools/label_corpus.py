@@ -38,7 +38,7 @@ def validate_labels(raw: dict[str, str]) -> dict[str, Any]:
     Rules (from IMb spec):
       - barcode_id : exactly 2 digits
       - stid       : exactly 3 digits
-      - mid        : 6 or 9 digits
+      - mid        : 6 digits starting 0-8, or 9 digits starting 9
       - serial     : 9 digits if mid has 6, else 6 digits (mid + serial = 15)
       - routing    : 0, 5, 9, or 11 digits (optional — empty string allowed)
       - notes      : free text (optional)
@@ -61,6 +61,8 @@ def validate_labels(raw: dict[str, str]) -> dict[str, Any]:
     mid = digits("mid", raw.get("mid", ""))
     if len(mid) not in (6, 9):
         raise ValidationError(f"mid must be 6 or 9 digits, got {len(mid)}")
+    if (len(mid) == 9) != mid.startswith("9"):
+        raise ValidationError(f"9-digit mids start with 9 and 6-digit mids don't, got {mid}")
 
     serial = digits("serial", raw.get("serial", ""))
     expected_serial = 9 if len(mid) == 6 else 6

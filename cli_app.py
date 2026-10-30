@@ -425,7 +425,7 @@ def _estimate_pitch(binary: np.ndarray, bar_runs: list):
     max_w = np.median(widths) * 2.5
     col_ink = binary.sum(axis=0).astype(np.float64)
     profile = np.zeros_like(col_ink)
-    for (s, e), w in zip(bar_runs, widths):
+    for (s, e), w in zip(bar_runs, widths, strict=True):
         if w <= max_w:
             profile[s : e + 1] = col_ink[s : e + 1]
     profile -= profile.mean()
@@ -573,7 +573,7 @@ class BarRead:
 
 
 def _bits_to_fadt(asc, desc) -> str:
-    return "".join("TADF"[int(a) | int(d) << 1] for a, d in zip(asc, desc))
+    return "".join("TADF"[int(a) | int(d) << 1] for a, d in zip(asc, desc, strict=True))
 
 
 def _vertical_runs(binary: np.ndarray, bar_runs: list) -> list:
@@ -591,7 +591,7 @@ def _vertical_runs(binary: np.ndarray, bar_runs: list) -> list:
         breaks = np.flatnonzero(np.diff(rows) > max_gap)
         starts = np.r_[rows[0], rows[breaks + 1]]
         ends = np.r_[rows[breaks], rows[-1]]
-        out.append(list(zip(starts.tolist(), ends.tolist())))
+        out.append(list(zip(starts.tolist(), ends.tolist(), strict=True)))
     return out
 
 
@@ -633,7 +633,7 @@ def _classify_runs(xs: np.ndarray, runs_per_bar: list) -> BarRead:
     slope, intercept = _robust_line(xs, mids)
     center = slope * xs + intercept
 
-    chosen = [_run_at(runs, c) for runs, c in zip(runs_per_bar, center)]
+    chosen = [_run_at(runs, c) for runs, c in zip(runs_per_bar, center, strict=True)]
     trend = slope * xs
     tops = np.array([t for t, _ in chosen], dtype=np.float64) - trend
     bottoms = np.array([b for _, b in chosen], dtype=np.float64) - trend

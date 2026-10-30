@@ -15,7 +15,8 @@ Streamlit app that detects and decodes USPS Intelligent Mail Barcodes (IMB) from
 ## Setup
 
 ```bash
-# Install dependencies (uv creates/syncs .venv from pyproject.toml + uv.lock)
+# Install dependencies (uv creates/syncs .venv from pyproject.toml + uv.lock).
+# Requires Python 3.11+; uv installs the pinned 3.13 if it's missing.
 uv sync
 
 # Run the Streamlit app
@@ -29,7 +30,9 @@ Then open http://localhost:8501 in your browser.
 
 ## Configuration
 
-Copy `.env.example` to `.env` and fill in values:
+Copy `.env.example` to `.env` and fill in values. `just run` instead exports secrets named
+`NAME__USPS_IMB_SCANNER` from the Bitwarden Secrets Manager project `dev`; variables already set
+take precedence over `.env`.
 
 | Variable | Purpose |
 |---|---|

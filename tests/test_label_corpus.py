@@ -17,12 +17,12 @@ def test_valid_9_digit_mid():
         {
             "barcode_id": "00",
             "stid": "243",
-            "mid": "000867000",
+            "mid": "900867000",
             "serial": "723775",
             "routing": "",
         }
     )
-    assert result["tracking"] == "00243000867000723775"
+    assert result["tracking"] == "00243900867000723775"
     assert result["routing"] == ""
 
 
@@ -82,6 +82,20 @@ def test_bad_stid(bad_stid):
         )
 
 
+@pytest.mark.parametrize(("bad_mid", "serial"), [("900867", "723775589"), ("000867000", "723775")])
+def test_mid_first_digit_must_match_length(bad_mid, serial):
+    with pytest.raises(ValidationError, match="9-digit mids start with 9"):
+        validate_labels(
+            {
+                "barcode_id": "00",
+                "stid": "243",
+                "mid": bad_mid,
+                "serial": serial,
+                "routing": "",
+            }
+        )
+
+
 @pytest.mark.parametrize("bad_mid", ["00086", "0008670", "0008670000"])
 def test_bad_mid_length(bad_mid):
     with pytest.raises(ValidationError):
@@ -114,7 +128,7 @@ def test_serial_length_must_complement_mid():
             {
                 "barcode_id": "00",
                 "stid": "243",
-                "mid": "000867000",
+                "mid": "900867000",
                 "serial": "723775589",
                 "routing": "",
             }

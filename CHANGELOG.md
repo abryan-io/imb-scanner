@@ -31,9 +31,22 @@ All notable changes to this project will be documented in this file.
 - CHANGELOG.md + expanded README covering uv, tests, failed-scan capture, and project layout.
 
 ### Fixed
+- PDF uploads rendered every page at 300 DPI (~25 MB each) before scanning, so a long PDF could exhaust the server's memory. Pages are now rendered one at a time and only the first 20 are scanned, with a warning; password-protected PDFs get an error message.
+- A corrupt or unreadable image upload showed a raw traceback; it now shows an error message.
+- The sidebar had the MID rule reversed: 6-digit MIDs start with 0-8 and 9-digit MIDs with 9.
+- `tools/label_corpus.py` accepted MIDs whose first digit contradicts their length, which the decoder can never produce.
+- Under pytest-xdist (`just test-all`), every worker also appended a partial row to `test-results/history.jsonl`; only the controller writes now.
+- The wheel left out `mid_lookup.py`, `failed_scan_store.py`, `unknown_mid_log.py` and `MID_Lkp.xlsx`, so an installed `app.py` could not import; `tests/test_packaging.py` checks the list.
+- The devcontainer installed a nonexistent `requirements.txt` plus bare Streamlit, so the app could not import; it now runs `uv sync` on Python 3.13.
 - MID lookup missed every 6-digit MID with leading zeros (27 of 156 rows, e.g. `000128`), because Excel stores them as numbers. `mid_lookup.normalize_mid()` pads short numeric MIDs back to 6 digits.
 
 ### Changed
+- Python 3.9 and 3.10 are end-of-life: `requires-python` is now `>=3.11` and `.python-version` is 3.13. The lock no longer carries a separate, unpatchable set of 3.9 pins.
+- Re-locked for security fixes: Pillow 13.0.0, urllib3 2.8.0, idna 3.20, certifi 2026.10.23. Streamlit 1.66.1 replaces its tornado server with starlette/uvicorn and no longer pulls in tornado or GitPython. Floors raised to `Pillow>=12.3` and `streamlit>=1.49`.
+- OpenCV 5 (`opencv-python-headless>=5.0`, locked 5.0.0.93). Decode counts under every robustness distortion match 4.x.
+- `st.image(use_container_width=True)`, deprecated, is now `width="stretch"`.
+- ruff 0.17.3 in the dev group and pre-commit; `zip()` calls in `cli_app.py` pass `strict=True` (B905 applies from Python 3.10).
+- boto3 1.43.121.
 - MID table loading moved from `app.py` to `mid_lookup.py`; R2 client construction factored into `failed_scan_store._r2_client()`.
 - Streamlit uploads and camera captures honor EXIF orientation.
 - Morphological detector's vertical opening kernel is now `H // 400` (was `H // 100`, which erased all but full-height bars at 300 DPI).

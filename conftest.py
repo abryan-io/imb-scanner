@@ -123,6 +123,8 @@ def _write_markdown(md_path: Path, entry: dict, stats: dict) -> None:
 
 def pytest_terminal_summary(terminalreporter, exitstatus, config):
     """Emit history.jsonl row + markdown summary after the session wraps."""
+    if hasattr(config, "workerinput"):
+        return
     stats = terminalreporter.stats
     counts = _stat_counts(stats)
     duration = time.time() - (_SESSION_START or time.time())
