@@ -2,18 +2,16 @@
 
 ## Where I left off
 
-Branch `fix/2026-W44-audit`, committed: every 2026-W44 audit finding plus the code fixes from the
-review (PDF page cap, upload errors, sidebar MID rule, labeler MID rule, xdist history rows,
-devcontainer, wheel contents). Python 3.13, OpenCV 5, Pillow 13, Streamlit 1.66.1. Streamlit Cloud
-on 3.11 is within the new floor. The 20-page PDF limit is confirmed. `audit/2026-W43` is deleted.
-
-The devcontainer itself is untested (no Docker here).
+The 2026-W44 audit fixes (`5353ec7`) are merged into master and pushed: Python 3.13 (3.11+
+required), OpenCV 5, Pillow 13, Streamlit 1.66.1, the 20-page PDF cap, upload errors, the sidebar
+and labeler MID rules, xdist history rows, the devcontainer and the wheel contents. The merged
+branches and the old Python 3.12 `venv/` are deleted.
 
 ## Next step
 
-Merge `fix/2026-W44-audit` into master.
+Check the Streamlit Cloud app redeployed cleanly on 3.11, and open the devcontainer in Codespaces
+once; it hasn't run since the move to uv and Python 3.13.
 
 ## Open questions
 
-- The Stop hook's `just test` appends to the tracked `history.jsonl`, which changes the tree hash it
-  caches on, so it re-runs the suite at every turn end. Keep history out of git, or out of the hash?
+None.
